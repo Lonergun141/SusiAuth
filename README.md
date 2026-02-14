@@ -1,4 +1,4 @@
-# 🔐 SusiAuth
+#  SusiAuth
 
 > “Susi sa imong sistema.”  
 > The key to your ecosystem.
@@ -8,7 +8,7 @@ It is designed to be plugged into multiple applications or microservices as a ce
 
 ---
 
-## ✨ Features
+## Features
 
 - RS256 JWT Access Tokens
 - Refresh Token Rotation
