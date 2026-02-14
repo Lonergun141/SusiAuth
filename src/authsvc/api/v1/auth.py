@@ -1,0 +1,2 @@
+# AuthBearer dependency
+pass

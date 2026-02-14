@@ -1,0 +1,3 @@
+from ninja import Schema
+
+# class LoginRequest(Schema): ...
