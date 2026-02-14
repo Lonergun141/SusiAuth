@@ -17,6 +17,8 @@ services:
       - db
     ports:
       - "8000:8000"
+    environment:
+      - DB_HOST=db
     volumes:
       - .:/app
       - ./keys:/app/keys
