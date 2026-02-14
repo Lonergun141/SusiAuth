@@ -1,0 +1,1 @@
+This project uses src/ layout. Add PYTHONPATH=src when running outside docker.
