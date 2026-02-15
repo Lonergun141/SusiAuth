@@ -3,12 +3,9 @@ from django.db import transaction
 from ninja import Router
 from ninja.errors import HttpError
 
-from authsvc.api.v1.schemas import (
-    RegisterIn, LoginIn, TokenOut, RefreshIn, LogoutIn,
-    VerifyEmailIn, EmailIn, ResetPasswordIn, ChangePasswordIn, MeOut
-)
-from authsvc.api.v1.auth import auth
-from authsvc.apps.accounts.models import User
+from authsvc.apps.accounts.models import User, RegistrationField, EmailOTP
+from authsvc.apps.accounts.utils import generate_otp_code
+from authsvc.apps.common.emailer import send_auth_email
 from authsvc.apps.tokens.services import (
     issue_token_pair,
     rotate_refresh_token,
@@ -16,12 +13,31 @@ from authsvc.apps.tokens.services import (
     revoke_all_refresh_tokens,
     create_one_time_token,
     consume_one_time_token,
-    send_verify_email,
     send_reset_password_email,
 )
 from authsvc.apps.tokens.models import OneTimeToken
+from authsvc.api.v1.auth import auth
+from authsvc.api.v1.schemas import (
+    RegistrationFieldOut,
+    RegisterIn,
+    VerifyEmailIn,
+    TokenOut,
+    ResendVerificationIn,
+    LoginIn,
+    RefreshIn,
+    LogoutIn,
+    MeOut,
+    ChangePasswordIn,
+    EmailIn,
+    ResetPasswordIn,
+)
 
 router = Router(tags=["auth"])
+
+
+@router.get("/registration-fields", response=list[RegistrationFieldOut])
+def get_registration_fields(request):
+    return RegistrationField.objects.filter(is_active=True)
 
 
 @router.post("/register", response={201: dict})
@@ -29,47 +45,124 @@ def register(request, data: RegisterIn):
     if User.objects.filter(email__iexact=data.email).exists():
         raise HttpError(400, "Email already registered")
 
-    user = User.objects.create_user(
-        email=data.email,
-        password=data.password,
-        first_name=data.first_name or "",
-        last_name=data.last_name or "",
-        is_active=True,
-        is_email_verified=False,
+    # Validate custom fields
+    active_fields = RegistrationField.objects.filter(is_active=True)
+    custom_data = {}
+    
+    for field in active_fields:
+        value = data.custom_fields.get(field.name)
+        if field.required and value is None:
+             raise HttpError(400, f"Missing required field: {field.label}")
+        
+        # Basic type validation could go here
+        if value is not None:
+             custom_data[field.name] = value
+
+    with transaction.atomic():
+        user = User.objects.create_user(
+            email=data.email,
+            password=data.password,
+            first_name=data.first_name or "",
+            last_name=data.last_name or "",
+            is_active=False,  # Inactive until verified
+            is_email_verified=False,
+            custom_fields=custom_data
+        )
+
+        # Generate OTP
+        otp_code = generate_otp_code()
+        expiry = timezone.now() + timezone.timedelta(minutes=10)
+        EmailOTP.objects.create(user=user, code=otp_code, expires_at=expiry)
+    
+    # Send Email
+    send_auth_email(
+        user.email,
+        "Verify your email",
+        f"Your verification code is: {otp_code}"
     )
 
-    token = create_one_time_token(user, OneTimeToken.PURPOSE_VERIFY_EMAIL, ttl_minutes=30)
-    send_verify_email(user, token)
-    return 201, {"message": "Registered. Please verify your email."}
+    return 201, {"message": "Registered. Please check your email for the verification code."}
 
 
-@router.post("/verify-email", response={200: dict})
+@router.post("/verify-email", response={200: TokenOut})
 def verify_email(request, data: VerifyEmailIn):
-    user = consume_one_time_token(data.token, OneTimeToken.PURPOSE_VERIFY_EMAIL)
+    try:
+        user = User.objects.get(email__iexact=data.email)
+    except User.DoesNotExist:
+        raise HttpError(400, "Invalid email or code")
+
+    # Check OTP
+    otp = user.otps.filter(
+        code=data.code,
+        is_verified=False,
+        expires_at__gt=timezone.now()
+    ).last()
+
+    if not otp:
+        # Check if user is already verified? 
+        # For now, just generic error to avoid enumeration if possible, 
+        # but UX usually prefers knowing if code is wrong.
+        raise HttpError(400, "Invalid or expired code")
+    
+    if otp.attempts >= 3:
+         raise HttpError(400, "Too many failed attempts. Request a new code.")
+
+    # Mark verified
+    otp.is_verified = True
+    otp.save()
+
+    # Activate user
     user.is_email_verified = True
-    user.save(update_fields=["is_email_verified"])
-    return {"message": "Email verified"}
+    user.is_active = True
+    user.save(update_fields=["is_email_verified", "is_active"])
+    
+    # Clear other OTPs? Optional.
+
+    access, refresh = issue_token_pair(user, request)
+    return {"access_token": access, "refresh_token": refresh}
 
 
 @router.post("/resend-verification", response={200: dict})
-def resend_verification(request, data: EmailIn):
+def resend_verification(request, data: ResendVerificationIn):
     user = User.objects.filter(email__iexact=data.email).first()
-    if not user or user.is_email_verified:
-        return {"message": "If the account exists, we sent an email."}
+    if not user:
+        # Security: don't reveal user existence
+        return {"message": "If the account exists, we sent a code."}
 
-    token = create_one_time_token(user, OneTimeToken.PURPOSE_VERIFY_EMAIL, ttl_minutes=30)
-    send_verify_email(user, token)
-    return {"message": "If the account exists, we sent an email."}
+    if user.is_email_verified:
+         return {"message": "Account already verified."}
+
+    # Invalidate old unverified OTPs? 
+    # Or just generate a new one.
+    
+    otp_code = generate_otp_code()
+    expiry = timezone.now() + timezone.timedelta(minutes=10)
+    EmailOTP.objects.create(user=user, code=otp_code, expires_at=expiry)
+
+    send_auth_email(
+        user.email,
+        "Verify your email",
+        f"Your verification code is: {otp_code}"
+    )
+    
+    return {"message": "If the account exists, we sent a code."}
 
 
 @router.post("/login", response={200: TokenOut})
 def login(request, data: LoginIn):
     user = User.objects.filter(email__iexact=data.email).first()
-    if not user or not user.is_active or not user.check_password(data.password):
-        raise HttpError(401, "Invalid credentials")
+    
+    if user and user.check_password(data.password):
+        if not user.is_email_verified:
+            raise HttpError(401, "Email is not verified. Please verify your email address.")
+        
+        if not user.is_active:
+             raise HttpError(401, "Account is disabled.")
 
-    access, refresh = issue_token_pair(user, request)
-    return {"access_token": access, "refresh_token": refresh}
+        access, refresh = issue_token_pair(user, request)
+        return {"access_token": access, "refresh_token": refresh}
+    
+    raise HttpError(401, "Invalid credentials")
 
 
 @router.post("/refresh", response={200: TokenOut})

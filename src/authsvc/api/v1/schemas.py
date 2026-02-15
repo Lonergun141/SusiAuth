@@ -1,14 +1,29 @@
 from ninja import Schema
-from typing import Optional
+from pydantic import EmailStr, Field
+
+class RegistrationFieldOut(Schema):
+    name: str
+    label: str
+    field_type: str
+    required: bool
+    options: list[str] = []
 
 class RegisterIn(Schema):
-    email: str
+    email: EmailStr
     password: str
-    first_name: Optional[str] = ""
-    last_name: Optional[str] = ""
+    first_name: str | None = None
+    last_name: str | None = None
+    custom_fields: dict = {}
+
+class VerifyEmailIn(Schema):
+    email: EmailStr
+    code: str
+
+class ResendVerificationIn(Schema):
+    email: EmailStr
 
 class LoginIn(Schema):
-    email: str
+    email: EmailStr
     password: str
 
 class TokenOut(Schema):
@@ -21,23 +36,20 @@ class RefreshIn(Schema):
 class LogoutIn(Schema):
     refresh_token: str
 
-class VerifyEmailIn(Schema):
-    token: str
-
-class EmailIn(Schema):
-    email: str
-
-class ResetPasswordIn(Schema):
-    token: str
-    new_password: str
+class MeOut(Schema):
+    id: int
+    email: EmailStr
+    first_name: str
+    last_name: str
+    is_email_verified: bool
 
 class ChangePasswordIn(Schema):
     current_password: str
     new_password: str
 
-class MeOut(Schema):
-    id: int
-    email: str
-    first_name: str
-    last_name: str
-    is_email_verified: bool
+class EmailIn(Schema):
+    email: EmailStr
+
+class ResetPasswordIn(Schema):
+    token: str
+    new_password: str
