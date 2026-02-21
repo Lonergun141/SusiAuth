@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.db import models
 from django.utils import timezone
+import uuid
 
 class UserManager(BaseUserManager):
     def create_user(self, email: str, password: str | None = None, **extra):
@@ -23,6 +24,7 @@ class UserManager(BaseUserManager):
         return self.create_user(email=email, password=password, **extra)
 
 class User(AbstractBaseUser, PermissionsMixin):
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     email = models.EmailField(unique=True)
     first_name = models.CharField(max_length=80, blank=True, default="")
     last_name = models.CharField(max_length=80, blank=True, default="")
@@ -42,6 +44,18 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.email
+
+
+class UserSession(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    session_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return str(self.session_id)
 
 
 class RegistrationField(models.Model):
@@ -69,7 +83,7 @@ class RegistrationField(models.Model):
 
 class EmailOTP(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otps')
-    code = models.CharField(max_length=6)
+    code_hash = models.CharField(max_length=255, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     is_verified = models.BooleanField(default=False)

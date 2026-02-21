@@ -1,11 +1,13 @@
 from django.utils import timezone
 from django.db import transaction
+from django.conf import settings
 from ninja import Router
 from ninja.errors import HttpError
 
 from authsvc.apps.accounts.models import User, RegistrationField, EmailOTP
 from authsvc.apps.accounts.utils import generate_otp_code
 from authsvc.apps.common.emailer import send_auth_email
+from authsvc.apps.common.pwned import check_password_complexity
 from authsvc.apps.tokens.services import (
     issue_token_pair,
     rotate_refresh_token,
@@ -17,6 +19,7 @@ from authsvc.apps.tokens.services import (
 )
 from authsvc.apps.tokens.models import OneTimeToken
 from authsvc.api.v1.auth import auth
+from django_ratelimit.decorators import ratelimit
 from authsvc.api.v1.schemas import (
     RegistrationFieldOut,
     RegisterIn,
@@ -41,9 +44,12 @@ def get_registration_fields(request):
 
 
 @router.post("/register", response={201: dict})
+@ratelimit(key="ip", rate="3/m", block=True)
 def register(request, data: RegisterIn):
     if User.objects.filter(email__iexact=data.email).exists():
         raise HttpError(400, "Email already registered")
+
+    check_password_complexity(data.password)
 
     # Validate custom fields
     active_fields = RegistrationField.objects.filter(is_active=True)
@@ -69,10 +75,11 @@ def register(request, data: RegisterIn):
             custom_fields=custom_data
         )
 
-        # Generate OTP
+        from authsvc.apps.common.security import sha256_hex
+        otp_ttl = int(getattr(settings, "OTP_TTL_MINUTES", 5))
         otp_code = generate_otp_code()
-        expiry = timezone.now() + timezone.timedelta(minutes=10)
-        EmailOTP.objects.create(user=user, code=otp_code, expires_at=expiry)
+        expiry = timezone.now() + timezone.timedelta(minutes=otp_ttl)
+        EmailOTP.objects.create(user=user, code_hash=sha256_hex(otp_code), expires_at=expiry)
     
     # Send Email
     send_auth_email(
@@ -85,27 +92,33 @@ def register(request, data: RegisterIn):
 
 
 @router.post("/verify-email", response={200: TokenOut})
+@ratelimit(key="ip", rate="5/m", block=True)
 def verify_email(request, data: VerifyEmailIn):
     try:
         user = User.objects.get(email__iexact=data.email)
     except User.DoesNotExist:
         raise HttpError(400, "Invalid email or code")
 
-    # Check OTP
+    from authsvc.apps.common.security import sha256_hex
+    
+    # First, find any valid OTP for the user, order by newest.
+    # In a high-security setup, we only let them attempt the LATEST OTP.
     otp = user.otps.filter(
-        code=data.code,
         is_verified=False,
         expires_at__gt=timezone.now()
-    ).last()
+    ).order_by('-created_at').first()
 
     if not otp:
-        # Check if user is already verified? 
-        # For now, just generic error to avoid enumeration if possible, 
-        # but UX usually prefers knowing if code is wrong.
         raise HttpError(400, "Invalid or expired code")
     
     if otp.attempts >= 3:
          raise HttpError(400, "Too many failed attempts. Request a new code.")
+         
+    # Check Code
+    if otp.code_hash != sha256_hex(data.code):
+        otp.attempts += 1
+        otp.save(update_fields=["attempts"])
+        raise HttpError(400, "Invalid code")
 
     # Mark verified
     otp.is_verified = True
@@ -123,6 +136,7 @@ def verify_email(request, data: VerifyEmailIn):
 
 
 @router.post("/resend-verification", response={200: dict})
+@ratelimit(key="ip", rate="3/m", block=True)
 def resend_verification(request, data: ResendVerificationIn):
     user = User.objects.filter(email__iexact=data.email).first()
     if not user:
@@ -132,12 +146,16 @@ def resend_verification(request, data: ResendVerificationIn):
     if user.is_email_verified:
          return {"message": "Account already verified."}
 
-    # Invalidate old unverified OTPs? 
-    # Or just generate a new one.
-    
+    # Cooldown Check
+    last_otp = EmailOTP.objects.filter(user=user).order_by('-created_at').first()
+    if last_otp and last_otp.created_at > timezone.now() - timezone.timedelta(minutes=1):
+        raise HttpError(400, "Please wait before requesting another code.")
+
+    from authsvc.apps.common.security import sha256_hex
+    otp_ttl = int(getattr(settings, "OTP_TTL_MINUTES", 5))
     otp_code = generate_otp_code()
-    expiry = timezone.now() + timezone.timedelta(minutes=10)
-    EmailOTP.objects.create(user=user, code=otp_code, expires_at=expiry)
+    expiry = timezone.now() + timezone.timedelta(minutes=otp_ttl)
+    EmailOTP.objects.create(user=user, code_hash=sha256_hex(otp_code), expires_at=expiry)
 
     send_auth_email(
         user.email,
@@ -149,6 +167,7 @@ def resend_verification(request, data: ResendVerificationIn):
 
 
 @router.post("/login", response={200: TokenOut})
+@ratelimit(key="ip", rate="5/15m", block=True)
 def login(request, data: LoginIn):
     user = User.objects.filter(email__iexact=data.email).first()
     
@@ -166,6 +185,7 @@ def login(request, data: LoginIn):
 
 
 @router.post("/refresh", response={200: TokenOut})
+@ratelimit(key="ip", rate="20/m", block=True)
 def refresh(request, data: RefreshIn):
     try:
         user, new_refresh = rotate_refresh_token(data.refresh_token, request)
@@ -185,16 +205,16 @@ def logout(request, data: LogoutIn):
 
 @router.post("/logout-all", response={200: dict}, auth=auth)
 def logout_all(request):
-    user_id = int(request.jwt["sub"])
-    user = User.objects.get(id=user_id)
+    user_uuid = request.jwt["sub"]
+    user = User.objects.get(uuid=user_uuid)
     revoke_all_refresh_tokens(user)
     return {"message": "Logged out of all sessions"}
 
 
 @router.get("/me", response=MeOut, auth=auth)
 def me(request):
-    user_id = int(request.jwt["sub"])
-    user = User.objects.get(id=user_id)
+    user_uuid = request.jwt["sub"]
+    user = User.objects.get(uuid=user_uuid)
     return {
         "id": user.id,
         "email": user.email,
@@ -206,10 +226,12 @@ def me(request):
 
 @router.post("/change-password", response={200: dict}, auth=auth)
 def change_password(request, data: ChangePasswordIn):
-    user_id = int(request.jwt["sub"])
-    user = User.objects.get(id=user_id)
+    user_uuid = request.jwt["sub"]
+    user = User.objects.get(uuid=user_uuid)
     if not user.check_password(data.current_password):
         raise HttpError(400, "Current password incorrect")
+
+    check_password_complexity(data.new_password)
 
     user.set_password(data.new_password)
     user.save(update_fields=["password", "updated_at"])
@@ -218,6 +240,7 @@ def change_password(request, data: ChangePasswordIn):
 
 
 @router.post("/forgot-password", response={200: dict})
+@ratelimit(key="ip", rate="3/m", block=True)
 def forgot_password(request, data: EmailIn):
     user = User.objects.filter(email__iexact=data.email, is_active=True).first()
     if not user:
@@ -229,11 +252,14 @@ def forgot_password(request, data: EmailIn):
 
 
 @router.post("/reset-password", response={200: dict})
+@ratelimit(key="ip", rate="3/m", block=True)
 @transaction.atomic
 def reset_password(request, data: ResetPasswordIn):
     user = consume_one_time_token(data.token, OneTimeToken.PURPOSE_RESET_PASSWORD)
     if not user.is_active:
         raise HttpError(400, "User inactive")
+
+    check_password_complexity(data.new_password)
 
     user.set_password(data.new_password)
     user.save(update_fields=["password", "updated_at"])

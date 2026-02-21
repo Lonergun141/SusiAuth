@@ -62,6 +62,13 @@ DATABASES = {
     }
 }
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "unique-snowflake",
+    }
+}
+
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -89,8 +96,10 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@musngi.com")
 
 JWT_ISSUER = os.getenv("JWT_ISSUER", "auth-service")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "your-apps")
-JWT_ACCESS_TTL_SECONDS = int(os.getenv("JWT_ACCESS_TTL_SECONDS", "900"))
+JWT_ACCESS_TTL_SECONDS = int(os.getenv("JWT_ACCESS_TTL_SECONDS", "600"))
 JWT_REFRESH_TTL_SECONDS = int(os.getenv("JWT_REFRESH_TTL_SECONDS", "2592000"))
+OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "5"))
+ONETIMETOKEN_TTL_MINUTES = int(os.getenv("ONETIMETOKEN_TTL_MINUTES", "15"))
 JWT_PRIVATE_KEY_PATH = os.getenv("JWT_PRIVATE_KEY_PATH", str(BASE_DIR / "keys/jwt_private.pem"))
 JWT_PUBLIC_KEY_PATH = os.getenv("JWT_PUBLIC_KEY_PATH", str(BASE_DIR / "keys/jwt_public.pem"))
 
