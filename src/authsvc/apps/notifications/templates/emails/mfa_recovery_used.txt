@@ -1,0 +1,9 @@
+Hi {{ first_name }},
+
+A recovery code was just used to sign in to your {{ product_name }} account.
+You have {{ remaining }} recovery code(s) left.
+
+If this was you, no action is needed. If it wasn't, contact {{ support_email }}
+immediately, reset your password, and regenerate your recovery codes.
+
+— The {{ product_name }} team

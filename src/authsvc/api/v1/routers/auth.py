@@ -10,6 +10,7 @@ from authsvc.api.v1.schemas import (
     ChangePasswordIn,
     EmailIn,
     LoginIn,
+    LoginOut,
     LogoutIn,
     MeOut,
     RefreshIn,
@@ -23,6 +24,7 @@ from authsvc.api.v1.schemas import (
 from authsvc.apps.accounts.models import EmailOTP, RegistrationField, User
 from authsvc.apps.accounts.utils import generate_otp_code
 from authsvc.apps.common.pwned import check_password_complexity
+from authsvc.apps.common.security import make_mfa_challenge
 from authsvc.apps.notifications import services as email_services
 from authsvc.apps.tokens.models import OneTimeToken
 from authsvc.apps.tokens.services import (
@@ -158,21 +160,26 @@ def resend_verification(request, data: ResendVerificationIn):
     return {"message": "If the account exists, we sent a code."}
 
 
-@router.post("/login", response={200: TokenOut})
+@router.post("/login", response={200: LoginOut})
 @ratelimit(key="ip", rate="5/15m", block=True)
 def login(request, data: LoginIn):
     user = User.objects.filter(email__iexact=data.email).first()
-    
+
     if user and user.check_password(data.password):
         if not user.is_email_verified:
             raise HttpError(401, "Email is not verified. Please verify your email address.")
-        
+
         if not user.is_active:
-             raise HttpError(401, "Account is disabled.")
+            raise HttpError(401, "Account is disabled.")
+
+        # MFA users get a short-lived challenge instead of tokens; they must
+        # complete POST /api/auth/mfa/verify with a code to receive tokens.
+        if user.mfa_enabled:
+            return {"mfa_required": True, "mfa_token": make_mfa_challenge(str(user.uuid))}
 
         access, refresh = issue_token_pair(user, request)
-        return {"access_token": access, "refresh_token": refresh}
-    
+        return {"mfa_required": False, "access_token": access, "refresh_token": refresh}
+
     raise HttpError(401, "Invalid credentials")
 
 
@@ -211,6 +218,7 @@ def me(request):
         "first_name": user.first_name,
         "last_name": user.last_name,
         "is_email_verified": user.is_email_verified,
+        "mfa_enabled": user.mfa_enabled,
     }
 
 

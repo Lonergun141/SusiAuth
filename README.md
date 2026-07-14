@@ -121,7 +121,11 @@ open  http://localhost:8000/api/docs            # interactive API docs
 |--------|------|------|---------|
 | POST | `/api/auth/register` | – | Register (creates inactive user, emails OTP) |
 | POST | `/api/auth/verify-email` | – | Verify OTP, activate, return tokens |
-| POST | `/api/auth/login` | – | Login, return access + refresh tokens |
+| POST | `/api/auth/login` | – | Login; returns tokens, or an MFA challenge if 2FA is on |
+| POST | `/api/auth/mfa/setup` · `/confirm` | Bearer | Enroll TOTP; confirm returns recovery codes |
+| POST | `/api/auth/mfa/verify` | – | 2nd login step: challenge + TOTP/recovery → tokens |
+| GET  | `/api/auth/mfa/status` | Bearer | MFA status + recovery codes remaining |
+| POST | `/api/auth/mfa/disable` · `/recovery-codes` | Bearer | Disable / regenerate (re-auth required) |
 | POST | `/api/auth/refresh` | – | Rotate refresh token, return new pair |
 | GET  | `/api/auth/me` | Bearer | Current user profile |
 | POST | `/api/auth/change-password` | Bearer | Change password |
@@ -168,6 +172,9 @@ ruff check src tests         # lint
 | `RESEND_WEBHOOK_SECRET` | – | Svix secret; required for the webhook + prod resend |
 | `CELERY_TASK_ALWAYS_EAGER` | `0` (dev `1`) | Run email tasks inline without a broker |
 | `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Redis broker for the Celery worker |
+| `MFA_ISSUER_NAME` | `SusiAuth` | Issuer shown in authenticator apps |
+| `MFA_CHALLENGE_TTL_SECONDS` | `300` | Lifetime of the post-password MFA challenge |
+| `MFA_SECRET_ENCRYPTION_KEY` | `SECRET_KEY` | Key for encrypting TOTP secrets at rest |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | `auth-service` / `your-apps` | Validated by downstream |
 | `JWT_ACCESS_TTL_SECONDS` | `600` | Access-token lifetime |
 | `JWT_REFRESH_TTL_SECONDS` | `2592000` | Refresh-token lifetime (30d) |

@@ -1,0 +1,9 @@
+Hi {{ first_name }},
+
+Two-factor authentication (2FA) has been disabled on your {{ product_name }}
+account. Your account is now protected by your password alone.
+
+If you didn't do this, your account may be compromised — contact
+{{ support_email }} immediately and reset your password.
+
+— The {{ product_name }} team

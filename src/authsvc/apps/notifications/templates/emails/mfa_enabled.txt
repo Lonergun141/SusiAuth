@@ -1,0 +1,11 @@
+Hi {{ first_name }},
+
+Two-factor authentication (2FA) is now enabled on your {{ product_name }} account.
+You'll be asked for a code from your authenticator app when you sign in.
+
+Keep your recovery codes somewhere safe — they're the only way in if you lose
+your device.
+
+If you didn't enable 2FA, contact {{ support_email }} immediately.
+
+— The {{ product_name }} team
