@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "authsvc.apps.accounts",
     "authsvc.apps.tokens",
     "authsvc.apps.notifications",
+    "authsvc.apps.mfa",
 ]
 
 MIDDLEWARE = [
@@ -140,3 +141,13 @@ JWT_PUBLIC_KEY_PATH = os.getenv("JWT_PUBLIC_KEY_PATH", str(BASE_DIR / "keys/jwt_
 
 FRONTEND_RESET_PASSWORD_URL = os.getenv("FRONTEND_RESET_PASSWORD_URL", "http://localhost/reset-password?token={token}")
 FRONTEND_VERIFY_EMAIL_URL = os.getenv("FRONTEND_VERIFY_EMAIL_URL", "http://localhost/verify-email?token={token}")
+
+# --- MFA (TOTP) --------------------------------------------------------------
+MFA_ISSUER_NAME = os.getenv("MFA_ISSUER_NAME", "SusiAuth")
+# Lifetime of the post-password "MFA required" challenge token.
+MFA_CHALLENGE_TTL_SECONDS = int(os.getenv("MFA_CHALLENGE_TTL_SECONDS", "300"))
+# Number of single-use recovery codes issued when MFA is enabled.
+MFA_RECOVERY_CODE_COUNT = int(os.getenv("MFA_RECOVERY_CODE_COUNT", "10"))
+# TOTP secrets are encrypted at rest with a key derived from this value
+# (defaults to SECRET_KEY). Set a dedicated value to rotate independently.
+MFA_SECRET_ENCRYPTION_KEY = os.getenv("MFA_SECRET_ENCRYPTION_KEY", "")

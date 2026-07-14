@@ -108,6 +108,37 @@ def make_access_jwt(user_uuid: str, email: str, roles: list[str] | None = None, 
     }
     if session_id:
         payload["sid"] = str(session_id)
-        
+
     kid = sha256_hex(settings.JWT_ISSUER)[:16]
     return jwt_sign_rs256(payload, kid=kid)
+
+def make_mfa_challenge(user_uuid: str) -> str:
+    """Short-lived signed token proving the password step passed, pending MFA.
+
+    It is NOT an access token: it carries purpose="mfa" and cannot be used as a
+    bearer credential (AuthBearer decodes it but callers check the claims).
+    """
+    import uuid
+    now = int(time.time())
+    ttl = getattr(settings, "MFA_CHALLENGE_TTL_SECONDS", 300)
+    payload = {
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
+        "sub": str(user_uuid),
+        "purpose": "mfa",
+        "iat": now,
+        "exp": now + ttl,
+        "jti": str(uuid.uuid4()),
+    }
+    kid = sha256_hex(settings.JWT_ISSUER)[:16]
+    return jwt_sign_rs256(payload, kid=kid)
+
+def verify_mfa_challenge(token: str) -> Dict[str, Any] | None:
+    """Return the payload of a valid MFA challenge token, or None."""
+    try:
+        payload = jwt_verify_rs256(token)
+    except Exception:
+        return None
+    if payload.get("purpose") != "mfa":
+        return None
+    return payload

@@ -31,6 +31,13 @@ class TokenOut(Schema):
     access_token: str
     refresh_token: str
 
+class LoginOut(Schema):
+    # Either tokens (no MFA) or an MFA challenge (mfa_required=True + mfa_token).
+    mfa_required: bool = False
+    access_token: str | None = None
+    refresh_token: str | None = None
+    mfa_token: str | None = None
+
 class RefreshIn(Schema):
     refresh_token: str
 
@@ -43,6 +50,7 @@ class MeOut(Schema):
     first_name: str
     last_name: str
     is_email_verified: bool
+    mfa_enabled: bool = False
 
 class ChangePasswordIn(Schema):
     current_password: str
@@ -54,3 +62,26 @@ class EmailIn(Schema):
 class ResetPasswordIn(Schema):
     token: str
     new_password: str
+
+# --- MFA ---------------------------------------------------------------------
+class MfaSetupOut(Schema):
+    secret: str
+    otpauth_uri: str
+
+class MfaConfirmIn(Schema):
+    code: str
+
+class RecoveryCodesOut(Schema):
+    recovery_codes: list[str]
+
+class MfaStatusOut(Schema):
+    enabled: bool
+    recovery_codes_remaining: int
+
+class MfaReauthIn(Schema):
+    password: str
+    code: str
+
+class MfaVerifyIn(Schema):
+    mfa_token: str
+    code: str

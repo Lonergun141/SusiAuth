@@ -31,6 +31,7 @@ src/authsvc/
   apps/
     accounts/           User (custom, email login), UserSession, RegistrationField, EmailOTP
     tokens/             RefreshToken, OneTimeToken + services.py (token lifecycle)
+    mfa/                TOTPDevice, RecoveryCode + services.py (TOTP enroll/verify)
     notifications/      EmailProvider, OutboundEmail/WebhookEvent, Celery task, templates
     common/             security.py (JWT/JWKS/hashing), pwned.py (HIBP check)
     audit/              audit models/services (stubs)
@@ -63,6 +64,20 @@ if `DJANGO_SECRET_KEY` is missing/default, `DJANGO_ALLOWED_HOSTS` is empty/wildc
 missing, the frontend URLs are localhost, or (when `EMAIL_PROVIDER=resend`) `RESEND_API_KEY` /
 `RESEND_WEBHOOK_SECRET` are missing. It also sets HSTS, secure/HttpOnly cookies, SSL redirect,
 proxy SSL header, and nosniff/frame/referrer headers.
+
+## MFA (`apps/mfa`) — TOTP
+
+- **Enroll:** `POST /api/auth/mfa/setup` (auth) returns a secret + `otpauth://` URI (render as QR);
+  `POST /api/auth/mfa/confirm` verifies the first code, sets `User.mfa_enabled`, and returns
+  **recovery codes once**. Secrets are **encrypted at rest** (`crypto.py`, Fernet keyed off
+  `MFA_SECRET_ENCRYPTION_KEY`/`SECRET_KEY`); recovery codes are stored **SHA-256 hashed, single-use**.
+- **Login challenge:** when `mfa_enabled`, `/api/auth/login` returns `{mfa_required: true, mfa_token}`
+  instead of tokens (schema `LoginOut`). `mfa_token` is a short-lived signed JWT with `purpose="mfa"`
+  (`make_mfa_challenge`/`verify_mfa_challenge` in `common/security.py`) — NOT a bearer credential.
+  `POST /api/auth/mfa/verify {mfa_token, code}` accepts a TOTP **or** a recovery code and issues tokens.
+- **Manage:** `/disable` and `/recovery-codes` (regenerate) require re-auth (password + a current code).
+  `verify_factor()` tries TOTP (`pyotp`, ±1 window) then a recovery code. Enable/disable/recovery-use
+  send notification emails. Structured so WebAuthn can be added as a sibling factor.
 
 ## Email / notifications (`apps/notifications`)
 

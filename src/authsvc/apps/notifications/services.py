@@ -105,6 +105,51 @@ def send_password_reset_email(user, reset_url: str, *, expiry_minutes: int):
     )
 
 
+def send_mfa_enabled_email(user):
+    minute_bucket = int(timezone.now().timestamp()) // 60
+    context = _base_context() | {"first_name": user.first_name or "there"}
+    return _queue(
+        email_type="mfa_enabled",
+        to=user.email,
+        subject="Two-factor authentication enabled",
+        template_base="emails/mfa_enabled",
+        context=context,
+        idempotency_key="mfa-enabled/" + _digest(user.pk, minute_bucket),
+        user=user,
+    )
+
+
+def send_mfa_disabled_email(user):
+    minute_bucket = int(timezone.now().timestamp()) // 60
+    context = _base_context() | {"first_name": user.first_name or "there"}
+    return _queue(
+        email_type="mfa_disabled",
+        to=user.email,
+        subject="Two-factor authentication disabled",
+        template_base="emails/mfa_disabled",
+        context=context,
+        idempotency_key="mfa-disabled/" + _digest(user.pk, minute_bucket),
+        user=user,
+    )
+
+
+def send_mfa_recovery_used_email(user):
+    minute_bucket = int(timezone.now().timestamp()) // 60
+    context = _base_context() | {
+        "first_name": user.first_name or "there",
+        "remaining": user.recovery_codes.filter(used_at__isnull=True).count(),
+    }
+    return _queue(
+        email_type="mfa_recovery_used",
+        to=user.email,
+        subject="A recovery code was used to sign in",
+        template_base="emails/mfa_recovery_used",
+        context=context,
+        idempotency_key="mfa-recovery-used/" + _digest(user.pk, minute_bucket),
+        user=user,
+    )
+
+
 def send_password_changed_email(user):
     # Per-minute bucket: dedupes accidental double-calls, still notifies genuine
     # separate changes.
