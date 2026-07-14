@@ -1,4 +1,6 @@
 """Shared pytest fixtures for the auth service test suite."""
+import os
+
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -34,6 +36,10 @@ def jwt_keys(tmp_path_factory):
 
     settings.JWT_PRIVATE_KEY_PATH = str(priv_path)
     settings.JWT_PUBLIC_KEY_PATH = str(pub_path)
+    # Also expose via env so a freshly-reloaded settings module (e.g. the prod
+    # settings tests) resolves the same keys instead of the default paths.
+    os.environ["JWT_PRIVATE_KEY_PATH"] = str(priv_path)
+    os.environ["JWT_PUBLIC_KEY_PATH"] = str(pub_path)
     yield
 
 

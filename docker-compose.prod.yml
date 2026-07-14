@@ -1,0 +1,70 @@
+# Production-oriented example stack.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Notes:
+#   * Postgres is NOT published to the host — only reachable on the internal
+#     network. Put a TLS-terminating reverse proxy / load balancer in front of
+#     `web` for HTTPS.
+#   * Migrations run once in a dedicated `migrate` service; the web container
+#     never migrates on boot and can scale to multiple replicas.
+#   * Signing keys are mounted read-only; they are never baked into the image.
+#   * Requires a `.env` with production values (DJANGO_SECRET_KEY,
+#     DJANGO_ALLOWED_HOSTS, DB_*, JWT_*, email, etc.). prod settings fail fast
+#     if required values are missing.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    command: python manage.py migrate --noinput
+    env_file: .env
+    environment:
+      - DB_HOST=db
+      - DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./keys:/app/keys:ro
+    restart: "no"
+
+  web:
+    build: .
+    # Uses the image's default CMD (Gunicorn).
+    env_file: .env
+    environment:
+      - DB_HOST=db
+      - DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./keys:/app/keys:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  pgdata:

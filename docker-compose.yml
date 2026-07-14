@@ -1,3 +1,5 @@
+# Development stack. The image defaults to Gunicorn + prod settings, so this
+# override runs the dev server with dev settings and a live source mount.
 services:
   db:
     image: postgres:16
@@ -9,16 +11,24 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-authuser} -d ${DB_NAME:-authdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web:
     build: .
+    command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     env_file: .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       - DB_HOST=db
+      - DJANGO_SETTINGS_MODULE=authsvc.config.settings.dev
     volumes:
       - .:/app
       - ./keys:/app/keys
