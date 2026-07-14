@@ -1,5 +1,5 @@
 from django.db import connection
-from django.http import HttpResponse
+from django.http import JsonResponse
 from ninja import Router
 
 router = Router()
@@ -18,7 +18,7 @@ def live(request):
 
 
 @router.get("/ready")
-def ready(request, response: HttpResponse):
+def ready(request):
     """Readiness probe — can we actually serve traffic?
 
     Checks the database connection and that JWT signing keys are present and
@@ -44,6 +44,7 @@ def ready(request, response: HttpResponse):
         checks["signing_key"] = "error"
         ok = False
 
+    body = {"status": "ready" if ok else "not_ready", "checks": checks}
     if not ok:
-        response.status_code = 503
-    return {"status": "ready" if ok else "not_ready", "checks": checks}
+        return JsonResponse(body, status=503)
+    return body

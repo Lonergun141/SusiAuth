@@ -49,6 +49,12 @@ for _label in ("FRONTEND_RESET_PASSWORD_URL", "FRONTEND_VERIFY_EMAIL_URL"):
     if "localhost" in _url or _url.startswith("http://localhost"):
         raise ImproperlyConfigured(f"{_label} must be an explicit production URL, not localhost.")
 
+# --- Email provider ----------------------------------------------------------
+# When Resend is the provider, its API key and webhook secret are mandatory.
+if os.getenv("EMAIL_PROVIDER", "console") == "resend":
+    _require("RESEND_API_KEY")
+    _require("RESEND_WEBHOOK_SECRET")
+
 # --- HTTPS / proxy -----------------------------------------------------------
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = _bool("SECURE_SSL_REDIRECT", True)

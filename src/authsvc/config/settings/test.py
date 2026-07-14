@@ -20,8 +20,11 @@ if os.getenv("TEST_DATABASE") != "postgres":
         }
     }
 
-# Capture mail in-memory instead of sending it.
+# Capture mail via the in-memory provider; run Celery tasks inline.
+EMAIL_PROVIDER = "inmemory"
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
 
 # Rate limiting depends on a shared cache and would interfere with rapid test
 # calls; disable it so tests exercise business logic, not throttling.

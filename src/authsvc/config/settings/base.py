@@ -4,7 +4,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[4]  # project root
-load_dotenv(BASE_DIR / ".env")
+# SKIP_DOTENV lets tests reload settings without .env repopulating env vars.
+if os.getenv("SKIP_DOTENV") != "1":
+    load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret")
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
@@ -17,8 +19,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "anymail",
     "authsvc.apps.accounts",
     "authsvc.apps.tokens",
+    "authsvc.apps.notifications",
 ]
 
 MIDDLEWARE = [
@@ -87,13 +91,43 @@ USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+# --- Email -------------------------------------------------------------------
+# EMAIL_PROVIDER selects the delivery channel. "console" prints to the terminal
+# (dev), "resend" delivers via Anymail's Resend backend, "smtp" uses the
+# EMAIL_HOST_* settings. Resend-specific code lives in apps/notifications.
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "console")
+if EMAIL_PROVIDER == "resend":
+    EMAIL_BACKEND = "anymail.backends.resend.EmailBackend"
+elif EMAIL_PROVIDER == "console":
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+elif EMAIL_PROVIDER == "inmemory":
+    EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+else:
+    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@musngi.com")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@susiauth.local")
+
+ANYMAIL = {"RESEND_API_KEY": os.getenv("RESEND_API_KEY", "")}
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", DEFAULT_FROM_EMAIL)
+RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET", "")
+EMAIL_DELIVERY_ENABLED = os.getenv("EMAIL_DELIVERY_ENABLED", "1") == "1"
+
+# --- Celery ------------------------------------------------------------------
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "") or None
+# Run tasks inline (no broker) when true — used in dev/test.
+CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_TASK_ALWAYS_EAGER", "0") == "1"
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_TIME_LIMIT = 120
+CELERY_TASK_SOFT_TIME_LIMIT = 90
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 JWT_ISSUER = os.getenv("JWT_ISSUER", "auth-service")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "your-apps")

@@ -1,5 +1,7 @@
 # Development stack. The image defaults to Gunicorn + prod settings, so this
 # override runs the dev server with dev settings and a live source mount.
+# Redis + a Celery worker are included so email delivery runs the real
+# (non-eager) path in Docker.
 services:
   db:
     image: postgres:16
@@ -17,6 +19,16 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
     build: .
     command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
@@ -24,11 +36,33 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       - DB_HOST=db
       - DJANGO_SETTINGS_MODULE=authsvc.config.settings.dev
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_TASK_ALWAYS_EAGER=0
+    volumes:
+      - .:/app
+      - ./keys:/app/keys
+
+  worker:
+    build: .
+    command: celery -A authsvc.config worker -l info
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DB_HOST=db
+      - DJANGO_SETTINGS_MODULE=authsvc.config.settings.dev
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_TASK_ALWAYS_EAGER=0
     volumes:
       - .:/app
       - ./keys:/app/keys

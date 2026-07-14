@@ -27,15 +27,18 @@ src/authsvc/
     auth.py             AuthBearer (HttpBearer) — verifies JWT, sets request.jwt = payload
     schemas.py          Ninja request/response schemas
     routers/            auth.py (all auth endpoints), health.py
+    routers/            auth.py, health.py, webhooks.py (Resend)
   apps/
     accounts/           User (custom, email login), UserSession, RegistrationField, EmailOTP
     tokens/             RefreshToken, OneTimeToken + services.py (token lifecycle)
-    common/             security.py (JWT/JWKS/hashing), emailer.py, pwned.py (HIBP check)
-    audit/              audit models/services
+    notifications/      EmailProvider, OutboundEmail/WebhookEvent, Celery task, templates
+    common/             security.py (JWT/JWKS/hashing), pwned.py (HIBP check)
+    audit/              audit models/services (stubs)
+  config/celery.py      Celery app (config/__init__.py exposes celery_app)
   infrastructure/, utils/
 docs/postman/           Per-endpoint request/response docs (source of truth for the API surface)
 keys/                   RSA keypair lives here (gitignored except .gitkeep)
-tests/                  pytest stubs (conftest + test_auth_flow are currently placeholders)
+tests/                  pytest suite (token flow, health, prod settings, notifications)
 ```
 
 ## Running
@@ -57,8 +60,29 @@ DB not published to the host, read-only key mount, healthchecks, restart policie
 
 **Production settings fail fast:** `config/settings/prod.py` raises `ImproperlyConfigured` on import
 if `DJANGO_SECRET_KEY` is missing/default, `DJANGO_ALLOWED_HOSTS` is empty/wildcard, JWT key files are
-missing, or the frontend URLs are localhost. It also sets HSTS, secure/HttpOnly cookies, SSL redirect,
+missing, the frontend URLs are localhost, or (when `EMAIL_PROVIDER=resend`) `RESEND_API_KEY` /
+`RESEND_WEBHOOK_SECRET` are missing. It also sets HSTS, secure/HttpOnly cookies, SSL redirect,
 proxy SSL header, and nosniff/frame/referrer headers.
+
+## Email / notifications (`apps/notifications`)
+
+All auth email goes through this app — never `send_mail`/an SDK directly.
+
+- **Flow:** `services.send_*` renders the template **in the web process** (where the secret exists),
+  writes a **secret-free** `OutboundEmail` record, and enqueues delivery on `transaction.on_commit`.
+  The Celery task `tasks.send_outbound_email` sends via the provider and records status/provider id.
+- **Providers** (`providers.py`): selected by `EMAIL_PROVIDER` — `console` (dev), `resend`
+  (Anymail backend), `inmemory` (tests, `InMemoryEmailProvider.outbox`). Resend specifics stay here.
+- **Never persisted/logged:** OTP codes, reset links/tokens, rendered bodies. Sensitive content is
+  passed to the task transiently as arguments, not stored on `OutboundEmail`.
+- **Idempotency:** `OutboundEmail.idempotency_key` (unique) dedupes; an already sent/delivered record
+  is not re-sent. **Celery** runs eager (inline, no broker) in dev/test via `CELERY_TASK_ALWAYS_EAGER`;
+  a real worker + Redis run it in Docker/prod.
+- **Webhooks:** `POST /api/webhooks/resend` verifies the **Svix signature over the raw body** before
+  trusting JSON (`webhooks.py`), is idempotent on `svix-id` (`WebhookEvent`), and applies delivery
+  status with an out-of-order rank guard. Requires `RESEND_WEBHOOK_SECRET`.
+- **On-commit + tests:** dispatch happens on commit, so tests use the
+  `django_capture_on_commit_callbacks(execute=True)` fixture.
 
 Local (without Docker):
 
