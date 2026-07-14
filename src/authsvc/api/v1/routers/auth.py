@@ -1,38 +1,38 @@
-from django.utils import timezone
-from django.db import transaction
 from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+from django_ratelimit.decorators import ratelimit
 from ninja import Router
 from ninja.errors import HttpError
 
-from authsvc.apps.accounts.models import User, RegistrationField, EmailOTP
+from authsvc.api.v1.auth import auth
+from authsvc.api.v1.schemas import (
+    ChangePasswordIn,
+    EmailIn,
+    LoginIn,
+    LogoutIn,
+    MeOut,
+    RefreshIn,
+    RegisterIn,
+    RegistrationFieldOut,
+    ResendVerificationIn,
+    ResetPasswordIn,
+    TokenOut,
+    VerifyEmailIn,
+)
+from authsvc.apps.accounts.models import EmailOTP, RegistrationField, User
 from authsvc.apps.accounts.utils import generate_otp_code
 from authsvc.apps.common.emailer import send_auth_email
 from authsvc.apps.common.pwned import check_password_complexity
-from authsvc.apps.tokens.services import (
-    issue_token_pair,
-    rotate_refresh_token,
-    revoke_refresh_token,
-    revoke_all_refresh_tokens,
-    create_one_time_token,
-    consume_one_time_token,
-    send_reset_password_email,
-)
 from authsvc.apps.tokens.models import OneTimeToken
-from authsvc.api.v1.auth import auth
-from django_ratelimit.decorators import ratelimit
-from authsvc.api.v1.schemas import (
-    RegistrationFieldOut,
-    RegisterIn,
-    VerifyEmailIn,
-    TokenOut,
-    ResendVerificationIn,
-    LoginIn,
-    RefreshIn,
-    LogoutIn,
-    MeOut,
-    ChangePasswordIn,
-    EmailIn,
-    ResetPasswordIn,
+from authsvc.apps.tokens.services import (
+    consume_one_time_token,
+    create_one_time_token,
+    issue_token_pair,
+    revoke_all_refresh_tokens,
+    revoke_refresh_token,
+    rotate_refresh_token,
+    send_reset_password_email,
 )
 
 router = Router(tags=["auth"])
@@ -188,12 +188,10 @@ def login(request, data: LoginIn):
 @ratelimit(key="ip", rate="20/m", block=True)
 def refresh(request, data: RefreshIn):
     try:
-        user, new_refresh = rotate_refresh_token(data.refresh_token, request)
+        _user, access, new_refresh = rotate_refresh_token(data.refresh_token, request)
     except ValueError as e:
         raise HttpError(401, "Invalid refresh token") from e
 
-    access, _ = issue_token_pair(user, request)
-    # issue_token_pair issues a new refresh; we want the rotated one from the service:
     return {"access_token": access, "refresh_token": new_refresh}
 
 

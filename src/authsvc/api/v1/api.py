@@ -1,4 +1,5 @@
 from ninja import NinjaAPI
+
 from authsvc.api.v1.routers.auth import router as auth_router
 from authsvc.api.v1.routers.health import router as health_router
 from authsvc.apps.common.security import get_jwks

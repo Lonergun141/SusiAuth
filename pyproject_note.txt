@@ -1,1 +1,1774 @@
-This project uses src/ layout. Add PYTHONPATH=src when running outside docker.
+Act as a senior Django backend engineer, identity architect, application security engineer, DevOps engineer, and microservice architect.
+
+Repository:
+
+https://github.com/Lonergun141/SusiAuth
+
+## Primary objective
+
+Audit, redesign, and implement SusiAuth as a secure, reusable, independently deployable authentication and identity microservice that can serve multiple:
+
+* Web applications
+* Mobile applications
+* Internal systems
+* Backend microservices
+* Third-party clients
+* Multi-tenant SaaS platforms
+
+The existing repository contains an early Django and Django Ninja authentication implementation, but it is not yet production-ready.
+
+Improve the existing repository instead of replacing it blindly.
+
+The completed service must follow enterprise-level standards for:
+
+* Authentication
+* Authorization
+* OAuth 2.1
+* OpenID Connect
+* JWT security
+* Session management
+* Refresh-token rotation
+* MFA
+* Email delivery
+* Resend integration
+* Audit logging
+* Rate limiting
+* Docker deployment
+* Testing
+* Observability
+* CI/CD
+* Documentation
+
+Do not describe the service as enterprise-ready until the acceptance criteria have been verified through tests and working deployment configuration.
+
+---
+
+# 1. Required working process
+
+Follow this process before implementing changes.
+
+## Phase 1: Repository audit
+
+Inspect the entire repository, including:
+
+* Project structure
+* Django settings
+* Models
+* Migrations
+* API routers
+* Schemas
+* Token services
+* JWT implementation
+* Email implementation
+* Dockerfile
+* Docker Compose
+* Dependencies
+* Existing tests
+* Environment variables
+* Documentation
+* Git history where useful
+
+Produce a written audit containing:
+
+* Current architecture
+* Existing features
+* Critical defects
+* Security vulnerabilities
+* Data-model issues
+* Deployment issues
+* Missing tests
+* Missing documentation
+* Technical debt
+* Migration risks
+
+Rank all findings as:
+
+* Critical
+* High
+* Medium
+* Low
+
+## Phase 2: Architecture proposal
+
+Before implementing, define:
+
+* Target architecture
+* Module boundaries
+* Authentication flows
+* OAuth/OIDC flows
+* Email-delivery architecture
+* Session lifecycle
+* Refresh-token lifecycle
+* Security-event lifecycle
+* Docker services
+* Deployment topology
+* Trust boundaries
+* Failure handling
+* Migration strategy
+
+## Phase 3: Implementation
+
+Implement improvements in risk-priority order.
+
+Do not leave:
+
+* Placeholder implementations
+* Fake security
+* Incomplete handlers
+* Commented-out production logic
+* Untracked TODO items
+* Hardcoded secrets
+* Development-only behavior in production settings
+
+## Phase 4: Verification
+
+Run and document:
+
+* Unit tests
+* Integration tests
+* Security tests
+* Migration checks
+* Docker startup checks
+* Django deployment checks
+* Email tests
+* Resend webhook tests
+* Refresh-token concurrency tests
+* CI validation
+
+---
+
+# 2. Critical current issues to inspect and fix
+
+Explicitly investigate and resolve the following existing risks.
+
+## Refresh-token defects
+
+Verify whether login currently returns the stored refresh-token hash instead of the raw token.
+
+The correct behavior must be:
+
+1. Generate a cryptographically secure raw refresh token.
+2. Hash the token before database storage.
+3. Return the raw token exactly once.
+4. Never expose the stored hash to the client.
+5. Never log either the raw token or stored hash.
+
+Fix refresh rotation so that it does not:
+
+* Create an unnecessary new session
+* Create an unused refresh token
+* Create duplicate access tokens
+* Return a token unrelated to the rotated session
+* Allow two concurrent rotations to succeed
+* Lose the token-family relationship
+
+Refresh rotation must be:
+
+* Atomic
+* Transactional
+* Protected with database row locking
+* Safe against race conditions
+* Safe across multiple service instances
+
+Use `transaction.atomic()` and `select_for_update()` or an equivalent concurrency-safe design.
+
+## Session defects
+
+Ensure:
+
+* Login creates exactly one session.
+* Refresh continues the same session.
+* Single-session logout revokes only the intended session.
+* Logout-all revokes every active session and refresh token.
+* Revoked sessions cannot refresh.
+* Inactive sessions cannot issue new access tokens.
+* Session expiration is enforced.
+* Token-family reuse revokes the affected family or session.
+* Administrative session revocation works correctly.
+
+## Rate-limiting defects
+
+Do not use Django local-memory cache for production rate limiting.
+
+Process-local rate limiting is invalid in a multi-container environment because each application instance maintains separate counters.
+
+Use Redis-backed distributed rate limiting.
+
+## Email defects
+
+Remove unmanaged thread-based email sending.
+
+Do not use:
+
+* `ThreadPoolExecutor`
+* Fire-and-forget Python threads
+* Request-process background work
+* Direct network calls inside active database transactions
+
+Use:
+
+* Celery
+* Redis
+* Resend
+* Idempotency keys
+* Explicit retry policies
+* Structured delivery records
+* Verified webhooks
+
+## Docker defects
+
+Do not run:
+
+```bash
+python manage.py runserver
+```
+
+inside a production container.
+
+Do not run migrations automatically from every web replica.
+
+Use:
+
+* Gunicorn
+* Appropriate WSGI or ASGI workers
+* A dedicated migration command or one-off migration container
+* Non-root runtime user
+* Multi-stage Docker image
+* Health checks
+* Graceful shutdown
+
+## Production-setting defects
+
+Production must not accept:
+
+* Default Django secret keys
+* Wildcard allowed hosts
+* Missing Resend API key
+* Missing Resend webhook secret
+* Missing JWT signing keys
+* Debug mode
+* Unverified frontend URLs
+* Hardcoded local URLs
+* Insecure cookie settings
+* Untrusted proxy headers
+
+The service must fail fast when required production configuration is missing.
+
+---
+
+# 3. Target project architecture
+
+Organize the service into clear modules.
+
+A reasonable structure is:
+
+```text
+src/authsvc/
+├── api/
+│   ├── public/
+│   ├── authenticated/
+│   ├── admin/
+│   ├── internal/
+│   ├── oauth/
+│   └── webhooks/
+├── apps/
+│   ├── accounts/
+│   ├── clients/
+│   ├── oauth/
+│   ├── tokens/
+│   ├── sessions/
+│   ├── mfa/
+│   ├── permissions/
+│   ├── audit/
+│   ├── notifications/
+│   └── common/
+├── config/
+│   ├── settings/
+│   │   ├── base.py
+│   │   ├── local.py
+│   │   ├── test.py
+│   │   └── production.py
+│   ├── celery.py
+│   ├── urls.py
+│   ├── asgi.py
+│   └── wsgi.py
+└── templates/
+    └── emails/
+```
+
+Adapt this structure when the existing repository requires a safer incremental migration.
+
+## Architectural rules
+
+* Keep API routers thin.
+* Put business logic in application services.
+* Put query-heavy read logic in selectors where useful.
+* Do not place core logic inside model `save()` methods.
+* Do not generate raw secrets implicitly inside models.
+* Use explicit token-generation services.
+* Use typed input and output schemas.
+* Use dependency injection where it improves testability.
+* Avoid unnecessary abstractions.
+* Avoid circular imports.
+* Keep security-sensitive code small and testable.
+
+---
+
+# 4. Standards-based identity provider
+
+Move SusiAuth toward a standards-based identity provider rather than maintaining only custom login endpoints.
+
+Implement or establish a documented migration path for:
+
+* OAuth 2.1 security practices
+* OpenID Connect
+* Authorization Code flow with PKCE
+* Client Credentials flow
+* Refresh-token rotation
+* Token revocation
+* Token introspection where required
+* OIDC discovery metadata
+* JWKS
+* UserInfo
+* Registered redirect URIs
+* Client scopes
+* Allowed grant types
+* Public clients
+* Confidential clients
+* Client-secret hashing
+* Client-secret rotation
+* Logout flow
+* Consent support where required
+
+Do not implement Resource Owner Password Credentials grant.
+
+Use a maintained Django-compatible OAuth/OIDC library where practical.
+
+Do not create a complete custom OAuth server when a mature library can safely provide the required behavior.
+
+Document:
+
+* Selected OAuth/OIDC library
+* Why it was selected
+* Which components remain custom
+* How downstream systems integrate
+* Known limitations
+
+---
+
+# 5. User-account management
+
+Implement secure support for:
+
+* Registration
+* Email normalization
+* Case-insensitive email uniqueness
+* Email verification
+* Verification resend
+* Login
+* Logout
+* Logout-all
+* Password change
+* Forgot password
+* Password reset
+* Account profile retrieval
+* Account deactivation
+* Account suspension
+* Session listing
+* Session revocation
+* Security-event history
+* Failed-login tracking
+* Last successful login
+* Password-change timestamp
+* Administrative account recovery
+* Optional account lockout
+* Account anonymization or deletion policy
+
+Use UUIDs as public account identifiers.
+
+Do not expose sequential database primary keys through public APIs.
+
+## Identity versus profile data
+
+The authentication service should own only identity-related information.
+
+Examples:
+
+* Email
+* Display name where needed
+* Verification status
+* Account status
+* Security settings
+* Roles
+* Tenant memberships
+* Authentication factors
+
+Application-specific information should remain in downstream services.
+
+Avoid unrestricted JSON fields for arbitrary user data.
+
+When extensible metadata is required:
+
+* Define an explicit schema.
+* Validate keys and values.
+* Limit size.
+* Prohibit secrets and highly sensitive information.
+* Document ownership.
+
+---
+
+# 6. Authorization model
+
+Implement a reusable authorization foundation containing:
+
+* Roles
+* Permissions
+* Scopes
+* User-role assignments
+* OAuth client scopes
+* Tenant memberships
+* Tenant-specific roles
+* Service accounts
+* Administrative permissions
+
+JWTs must remain compact.
+
+Do not place:
+
+* Large permission collections
+* Full profiles
+* Sensitive personal data
+* Internal database state
+
+inside access tokens.
+
+Define how downstream services validate:
+
+* Issuer
+* Audience
+* Subject
+* Client
+* Scope
+* Role
+* Tenant
+* Token type
+* Expiration
+* Session identifier
+
+Document the difference between:
+
+* Stateless JWT validation
+* Server-side introspection
+* Immediate session revocation
+* Short-lived access-token expiration
+
+---
+
+# 7. JWT and signing-key security
+
+Use asymmetric signing.
+
+Prefer a maintained JOSE/JWT library rather than custom token encoding and signature verification.
+
+Access tokens must include:
+
+* `iss`
+* `aud`
+* `sub`
+* `iat`
+* `exp`
+* `jti`
+* `sid`
+* `scope`
+* `client_id` or authorized-party claim where applicable
+* Explicit token-type claim
+
+JWT verification must validate:
+
+* Signature
+* Allowed algorithm
+* `kid`
+* Issuer
+* Audience
+* Expiration
+* Not-before time
+* Token type
+* Required claims
+* Valid key status
+
+Never accept an algorithm supplied by the token without checking an explicit allowed-algorithm list.
+
+## Signing-key rotation
+
+Implement support for:
+
+* Multiple public keys
+* Stable `kid` values
+* One active signing key
+* Retired verification keys
+* Key activation time
+* Key retirement time
+* Safe JWKS publication
+* Documented rotation procedure
+
+Private keys must be provided through:
+
+* Mounted secrets
+* Container secrets
+* Cloud secret manager
+* Vault or equivalent secure storage
+
+Never commit private keys to Git.
+
+Do not generate production signing keys automatically during normal application startup.
+
+---
+
+# 8. Refresh tokens and sessions
+
+## Refresh-token model
+
+Store:
+
+* UUID
+* User
+* Session
+* OAuth client
+* Token hash
+* Token family UUID
+* Parent token
+* Replacement token
+* Created timestamp
+* Last-used timestamp
+* Absolute expiration
+* Inactivity expiration
+* Revoked timestamp
+* Revocation reason
+* IP metadata
+* User-agent metadata
+
+Only the cryptographic hash may be stored.
+
+## Rotation flow
+
+The refresh flow must:
+
+1. Hash the supplied raw token.
+2. Lock the matching database row.
+3. Verify the token exists.
+4. Verify it is not expired.
+5. Verify it is not revoked.
+6. Verify its session is active.
+7. Verify its client is active.
+8. Revoke the current token.
+9. Create one replacement token in the same family and session.
+10. Create one new access token.
+11. Commit atomically.
+12. Return the new raw refresh token once.
+
+## Reuse detection
+
+When an already rotated or revoked refresh token is reused:
+
+* Record a security event.
+* Revoke its token family.
+* Revoke the related session.
+* Optionally revoke all user sessions according to configured policy.
+* Notify the account owner through Resend.
+* Do not reveal sensitive internal details to the caller.
+
+## Concurrency
+
+Add an integration test that sends two simultaneous refresh requests using the same token.
+
+Exactly one request may succeed.
+
+The other must fail and trigger the configured reuse-detection response.
+
+---
+
+# 9. Password security
+
+Use Django’s password-validation system.
+
+Use Argon2id or another production-grade memory-hard password hasher.
+
+Implement:
+
+* Configurable minimum length
+* Common-password rejection
+* Numeric-only rejection
+* User-attribute similarity checks
+* Compromised-password checking
+* Password history when required
+* Password-change timestamp
+* Configurable lockout
+* Constant-time secret comparison where appropriate
+
+Define whether compromised-password checking fails open or fails closed when the provider is unavailable.
+
+Make the behavior configurable by environment.
+
+Never log:
+
+* Passwords
+* Password hashes
+* Password reset tokens
+* OTP values
+* Recovery codes
+
+---
+
+# 10. MFA
+
+Implement TOTP-based MFA with support for:
+
+* Enrollment initiation
+* Enrollment confirmation
+* QR-code provisioning data
+* TOTP challenge
+* Recovery codes
+* Recovery-code hashing
+* Recovery-code single use
+* MFA removal
+* Reauthentication before MFA removal
+* Administrative MFA reset
+* Audit events
+* Security notification email
+
+Structure the code so that WebAuthn and passkeys can be added later without redesigning account authentication.
+
+---
+
+# 11. Resend email-delivery architecture
+
+Use Resend as the primary production email provider.
+
+Use the official Resend-supported Django integration through:
+
+```text
+django-anymail[resend]
+```
+
+Configure:
+
+```python
+INSTALLED_APPS += ["anymail"]
+
+EMAIL_BACKEND = "anymail.backends.resend.EmailBackend"
+
+ANYMAIL = {
+    "RESEND_API_KEY": env("RESEND_API_KEY"),
+}
+```
+
+Adapt this configuration to the project’s settings-management approach.
+
+Do not hardcode API keys.
+
+## Required environment variables
+
+Add and validate:
+
+```text
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=
+RESEND_WEBHOOK_SECRET=
+RESEND_FROM_EMAIL=
+RESEND_FROM_NAME=SusiAuth
+RESEND_REPLY_TO=
+RESEND_SENDING_DOMAIN=
+AUTH_FRONTEND_BASE_URL=
+PASSWORD_RESET_PATH=/reset-password
+EMAIL_VERIFICATION_PATH=/verify-email
+EMAIL_SUPPORT_ADDRESS=
+EMAIL_SECURITY_ADDRESS=
+EMAIL_DELIVERY_ENABLED=true
+```
+
+Production startup must fail when required Resend values are missing.
+
+Do not print secret values during startup validation.
+
+## Domain setup
+
+Document the Resend dashboard setup:
+
+1. Add a dedicated email subdomain, such as:
+
+```text
+auth.example.com
+```
+
+or:
+
+```text
+mail.example.com
+```
+
+2. Add the DNS records supplied by Resend.
+3. Verify SPF.
+4. Verify DKIM.
+5. Configure DMARC.
+6. Wait for the domain to become verified.
+7. Configure a sender such as:
+
+```text
+SusiAuth <security@auth.example.com>
+```
+
+8. Configure a reply-to address.
+9. Use separate Resend API keys for development, staging, and production.
+10. Restrict API keys to the required domain and permissions when supported.
+11. Document API-key rotation.
+
+Prefer a dedicated sending subdomain to isolate authentication-email reputation from marketing or general transactional email.
+
+## Email abstraction
+
+Create an email-provider interface such as:
+
+```python
+class EmailProvider(Protocol):
+    def send(self, message: EmailMessageData) -> EmailSendResult:
+        ...
+```
+
+Implement:
+
+```text
+ResendEmailProvider
+ConsoleEmailProvider
+InMemoryEmailProvider
+```
+
+Use:
+
+* `ResendEmailProvider` in production
+* Console, file, or Mailpit-compatible delivery in local development
+* `InMemoryEmailProvider` in tests
+
+Keep Resend-specific code inside the notifications module.
+
+Authentication services must not call the Resend SDK directly.
+
+## Email-message model
+
+Create a persistent outbound email record containing:
+
+* Internal UUID
+* Email type
+* Recipient
+* Sender
+* Subject
+* Template name
+* Template version
+* Related user UUID
+* Related security event UUID
+* Idempotency key
+* Provider
+* Provider email ID
+* Status
+* Attempt count
+* Created timestamp
+* Queued timestamp
+* Sent timestamp
+* Delivered timestamp
+* Failed timestamp
+* Bounced timestamp
+* Complained timestamp
+* Last error category
+* Sanitized last error message
+
+Do not store:
+
+* OTP plaintext
+* Reset-token plaintext
+* Verification-token plaintext
+* Access tokens
+* Refresh tokens
+* Passwords
+* API keys
+
+When debugging context is required, store only non-sensitive identifiers.
+
+## Email types
+
+Implement templates for:
+
+* Email verification
+* Verification-code resend
+* Password reset
+* Password changed
+* Successful login from a new device
+* Suspicious login
+* Refresh-token reuse detected
+* MFA enabled
+* MFA disabled
+* MFA recovery-code used
+* Account locked
+* Account unlocked
+* Session revoked
+* All sessions revoked
+* Email address changed
+* Administrative account suspension
+* Account reactivated
+* Client-secret rotation where applicable
+
+## Template requirements
+
+Each authentication email must have:
+
+* HTML version
+* Plain-text version
+* Clear subject
+* Consistent branding
+* Expiration information
+* Security notice
+* Support contact
+* Safe action URL
+* No sensitive data in the subject
+* No raw token in logs
+* Minimal user information
+
+Use Django templates stored in the repository.
+
+Do not require a frontend framework to render authentication emails.
+
+## Verification email
+
+The verification email must contain:
+
+* Single-use verification link or code
+* Expiration time
+* Instructions for users who did not create the account
+* Support or security contact
+
+Verification tokens must:
+
+* Be generated cryptographically
+* Be stored only as hashes
+* Be single-use
+* Expire
+* Have attempt limits
+* Be invalidated when replaced
+* Be scoped specifically to email verification
+
+## Password-reset email
+
+The reset email must contain:
+
+* Single-use reset URL
+* Short expiration
+* Device or request context where safe
+* Instructions for unauthorized requests
+* Security contact
+
+Reset tokens must:
+
+* Be single-use
+* Be stored only as hashes
+* Expire
+* Be invalidated after successful use
+* Invalidate relevant sessions after password reset
+* Never appear in logs
+
+## Celery delivery
+
+All production email sending must happen through Celery.
+
+Required flow:
+
+1. Complete database changes inside a transaction.
+2. Create the outbound email record.
+3. Use `transaction.on_commit()` to enqueue the task.
+4. Pass only the outbound email UUID to Celery.
+5. Load the record inside the worker.
+6. Render the template.
+7. Send through Resend.
+8. Store the Resend email ID.
+9. Update delivery status.
+10. Record sanitized errors.
+11. Retry only retryable failures.
+
+Do not pass:
+
+* Django model instances
+* Raw tokens
+* Passwords
+* Secret values
+* Full request objects
+
+into Celery task arguments.
+
+## Retry policy
+
+Implement explicit retry categories.
+
+Retry:
+
+* Connection timeouts
+* Temporary network failures
+* HTTP 429
+* Resend temporary server failures
+* Temporary DNS failures
+* Safe concurrent idempotency conflicts
+
+Do not automatically retry:
+
+* Invalid recipient
+* Invalid sender
+* Unverified domain
+* Invalid API key
+* Invalid payload
+* Permanently bounced recipient
+* Suppressed recipient
+* Policy rejection
+
+Use:
+
+* Exponential backoff
+* Jitter
+* Maximum retry count
+* Maximum retry duration
+* Structured failure classification
+
+Do not retry indefinitely.
+
+## Idempotency
+
+Every authentication email must use a deterministic Resend idempotency key.
+
+Examples:
+
+```text
+verify-email/{verification-request-uuid}
+password-reset/{password-reset-request-uuid}
+password-changed/{security-event-uuid}
+new-login/{session-uuid}
+mfa-enabled/{security-event-uuid}
+token-reuse/{security-event-uuid}
+```
+
+Store the idempotency key in the outbound email record.
+
+Retries must reuse the exact same:
+
+* Idempotency key
+* Recipient
+* Sender
+* Subject
+* Body
+* Payload
+
+Do not reuse an idempotency key with modified content.
+
+Application-level deduplication must remain in place even when Resend idempotency is used.
+
+## Resend webhooks
+
+Create a public endpoint such as:
+
+```text
+POST /api/v1/webhooks/resend
+```
+
+The webhook endpoint must:
+
+* Read the raw request body.
+* Verify `svix-id`.
+* Verify `svix-timestamp`.
+* Verify `svix-signature`.
+* Verify against `RESEND_WEBHOOK_SECRET`.
+* Reject invalid signatures.
+* Reject stale webhook timestamps.
+* Store the webhook event ID.
+* Prevent duplicate processing.
+* Return quickly.
+* Enqueue event processing when additional work is required.
+
+Never trust parsed JSON before signature verification.
+
+## Webhook idempotency
+
+Resend webhooks use at-least-once delivery.
+
+Create a webhook event table containing:
+
+* `svix_id`
+* Event type
+* Provider email ID
+* Received timestamp
+* Provider event timestamp
+* Processing status
+* Processed timestamp
+* Sanitized payload
+* Error state
+
+Add a unique constraint on `svix_id`.
+
+Repeated delivery of the same event must return success without executing duplicate business actions.
+
+Do not assume webhook events arrive in order.
+
+Use provider timestamps and state-transition rules.
+
+## Webhook event handling
+
+Handle at least:
+
+* `email.sent`
+* `email.delivered`
+* `email.delivery_delayed`
+* `email.bounced`
+* `email.complained`
+* `email.failed`
+* `email.suppressed`
+
+Use open and click events only when enabled and legally appropriate.
+
+For authentication and security email, open and click tracking should be disabled by default unless there is a documented business requirement.
+
+## Bounce and complaint handling
+
+When receiving a permanent bounce:
+
+* Update the outbound email status.
+* Record a sanitized reason.
+* Mark the email address as temporarily or permanently undeliverable according to policy.
+* Prevent uncontrolled resend loops.
+* Surface the issue to administrative support.
+* Do not automatically disable an account solely because of one bounce.
+
+When receiving a complaint:
+
+* Record a security and delivery event.
+* Stop non-essential email.
+* Preserve essential account-security behavior according to policy.
+* Escalate repeated complaints.
+
+Do not implement marketing unsubscribe behavior inside the authentication service unless marketing email is explicitly added later.
+
+## Webhook security
+
+The webhook endpoint must:
+
+* Require HTTPS in production.
+* Enforce a request-size limit.
+* Verify signatures before JSON parsing.
+* Avoid logging the complete payload when it contains sensitive recipient data.
+* Use replay protection.
+* Use duplicate-event protection.
+* Return generic errors.
+* Avoid exposing internal exceptions.
+
+## Email observability
+
+Track metrics for:
+
+* Queued emails
+* Successful provider submissions
+* Delivered emails
+* Delayed emails
+* Failed emails
+* Bounced emails
+* Complaints
+* Suppressions
+* Celery retries
+* Delivery latency
+* Webhook verification failures
+* Duplicate webhook deliveries
+
+Logs must include:
+
+* Internal email UUID
+* Provider email ID
+* Email type
+* Delivery status
+* Request ID
+* Celery task ID
+
+Logs must not include:
+
+* Raw recipient token
+* Verification code
+* Reset link
+* API key
+* Webhook secret
+* Complete email body
+
+## Development email behavior
+
+Support one of the following in local development:
+
+* Django console backend
+* File-based backend
+* Mailpit
+* Resend test addresses
+
+Local development must not require a production Resend key.
+
+Add an explicit environment setting:
+
+```text
+EMAIL_PROVIDER=console
+```
+
+or:
+
+```text
+EMAIL_PROVIDER=resend
+```
+
+Do not silently fall back from Resend to console delivery in production.
+
+## Resend tests
+
+Create tests for:
+
+* Correct provider configuration
+* Missing API-key startup validation
+* Missing webhook-secret validation
+* Verification email rendering
+* Password-reset email rendering
+* Plain-text and HTML content
+* Celery task dispatch after transaction commit
+* No dispatch after transaction rollback
+* Retryable Resend errors
+* Permanent Resend errors
+* Idempotency-key reuse
+* Provider email ID persistence
+* Valid webhook signature
+* Invalid webhook signature
+* Stale webhook timestamp
+* Duplicate `svix-id`
+* Out-of-order events
+* Delivery event
+* Bounce event
+* Complaint event
+* Failed event
+* Suppressed event
+* No raw security token in logs
+* No duplicate email after Celery retry
+
+Mock the external Resend API in unit tests.
+
+Use controlled integration testing for Resend without sending real email to arbitrary recipients.
+
+---
+
+# 12. Redis and Celery
+
+Add Redis for:
+
+* Celery broker
+* Distributed rate limiting
+* Cache
+* Temporary security state
+* Optional session-revocation cache
+* Celery result backend only when needed
+
+Add separate services for:
+
+* Web application
+* Celery worker
+* Celery beat or scheduler when required
+* Redis
+* PostgreSQL
+
+Configure Celery with:
+
+* Acknowledgment behavior appropriate for idempotent tasks
+* Task time limits
+* Worker prefetch settings
+* Retry policy
+* Dead-letter or failed-task handling strategy
+* Structured logging
+* Graceful shutdown
+
+Periodic tasks should clean:
+
+* Expired OTP records
+* Expired one-time tokens
+* Expired sessions
+* Expired refresh tokens
+* Old webhook events
+* Old delivery records according to retention policy
+
+---
+
+# 13. API design
+
+Continue using Django Ninja unless the audit finds a strong technical reason to migrate.
+
+Requirements:
+
+* Versioned routes
+* Typed request schemas
+* Typed response schemas
+* Consistent errors
+* Correct HTTP status codes
+* Pagination
+* Filtering
+* Ordering
+* OpenAPI documentation
+* Authentication declarations
+* Correlation IDs
+* Idempotency support
+* No stack traces in production
+
+Use a consistent error shape such as:
+
+```json
+{
+  "error": {
+    "code": "invalid_credentials",
+    "message": "Authentication failed.",
+    "request_id": "uuid"
+  }
+}
+```
+
+Separate routers into:
+
+* Public authentication APIs
+* Authenticated user APIs
+* OAuth/OIDC APIs
+* Service-to-service APIs
+* Administrative APIs
+* Provider webhook APIs
+
+---
+
+# 14. Rate limiting and abuse protection
+
+Use Redis-backed distributed throttling.
+
+Apply separate limits for:
+
+* Registration by IP
+* Registration by email
+* Login by IP
+* Login by account identifier
+* Verification attempts
+* Verification resend
+* Forgot password
+* Password reset
+* Refresh-token requests
+* MFA challenges
+* OAuth authorization requests
+* Client authentication
+* Administrative endpoints
+* Resend webhook failures
+
+Include escalation behavior for repeated abuse.
+
+Do not rely only on IP addresses.
+
+Prevent account enumeration through:
+
+* Registration responses
+* Forgot-password responses
+* Verification resend responses
+* Login errors
+* Reset errors
+* Administrative search behavior
+
+---
+
+# 15. Audit and security events
+
+Create append-only audit events for:
+
+* Registration
+* Verification
+* Login success
+* Login failure
+* Refresh success
+* Refresh failure
+* Refresh-token reuse
+* Logout
+* Logout-all
+* Password change
+* Password reset
+* MFA enrollment
+* MFA removal
+* Recovery-code usage
+* Session revocation
+* Account lock
+* Account suspension
+* Role changes
+* Permission changes
+* OAuth client changes
+* Signing-key changes
+* Resend email submission
+* Email bounce
+* Email complaint
+* Administrative action
+
+Store:
+
+* Actor
+* Target
+* Event type
+* Timestamp
+* Request ID
+* IP
+* User agent
+* Result
+* Structured metadata
+
+Do not store secrets or raw tokens.
+
+Make security-event records append-only through application rules and database permissions where practical.
+
+---
+
+# 16. Database design
+
+Use PostgreSQL in production.
+
+Add appropriate:
+
+* Foreign keys
+* Unique constraints
+* Partial indexes
+* Check constraints
+* Expiration indexes
+* Active-session indexes
+* Token-family indexes
+* Webhook-event uniqueness
+* Email-provider-ID indexes
+* Case-insensitive email constraints
+
+Use PostgreSQL `citext` or a normalized-email field for reliable case-insensitive email uniqueness.
+
+Create data migrations for existing records where required.
+
+Do not depend only on application-level checks for security-critical uniqueness.
+
+---
+
+# 17. Docker setup
+
+Create a production-ready multi-stage Dockerfile.
+
+Requirements:
+
+* Current supported Python version
+* Build stage
+* Runtime stage
+* Dependency locking
+* Non-root user
+* Minimal runtime packages
+* No compiler in runtime image unless required
+* Correct file ownership
+* Health check support
+* Graceful shutdown
+* Gunicorn
+* No development server
+* No source-code bind mount in production
+* No embedded private keys
+* No embedded Resend API key
+
+## Docker Compose development services
+
+Include:
+
+* `web`
+* `worker`
+* `scheduler` when required
+* `db`
+* `redis`
+* `mailpit` when used
+* Optional migration service
+
+## Production deployment example
+
+Provide production-oriented Compose or deployment documentation that:
+
+* Does not expose PostgreSQL publicly
+* Does not expose Redis publicly
+* Uses secrets
+* Uses persistent PostgreSQL storage
+* Runs migrations separately
+* Supports multiple web replicas
+* Supports multiple Celery workers
+* Configures health checks
+* Configures restart policies
+* Uses production settings
+* Uses HTTPS termination through a reverse proxy or load balancer
+
+---
+
+# 18. Health checks
+
+Implement:
+
+## Liveness
+
+```text
+GET /health/live
+```
+
+Confirms that the application process is alive.
+
+Do not perform expensive dependency checks.
+
+## Readiness
+
+```text
+GET /health/ready
+```
+
+Check:
+
+* PostgreSQL
+* Redis
+* Required signing-key availability
+* Critical configuration validity
+
+Do not make a live Resend API request for every readiness check.
+
+Validate Resend configuration during startup and monitor delivery failures separately.
+
+## Startup
+
+Optionally expose:
+
+```text
+GET /health/startup
+```
+
+for environments that support startup probes.
+
+---
+
+# 19. Observability
+
+Implement:
+
+* Structured JSON logging in production
+* Human-readable development logging
+* Request IDs
+* Celery task IDs
+* Security-event logs
+* Email-delivery logs
+* Configurable log level
+* Metrics
+* Error-monitoring integration
+* OpenTelemetry integration points
+* Safe proxy configuration
+
+Do not log:
+
+* Passwords
+* Raw tokens
+* OTP codes
+* Recovery codes
+* Resend API keys
+* Resend webhook secrets
+* JWT private keys
+* OAuth client secrets
+
+---
+
+# 20. Security headers and network configuration
+
+Configure production security settings, including:
+
+* HTTPS redirect
+* Secure cookies
+* HttpOnly cookies
+* SameSite policy
+* HSTS
+* Content-Type nosniff
+* Referrer policy
+* Frame protection
+* Trusted CSRF origins
+* Explicit allowed hosts
+* Explicit CORS origins
+* Proxy SSL header
+* Secure forwarded-header handling
+
+Do not trust arbitrary `X-Forwarded-For`.
+
+Define trusted proxies or use infrastructure-provided client-IP handling.
+
+---
+
+# 21. Testing requirements
+
+Use:
+
+* pytest
+* pytest-django
+* PostgreSQL integration tests
+* Redis integration tests
+* Celery tests
+* Factory-based test data
+* Time freezing
+* Concurrency testing
+
+Test:
+
+* Registration
+* Email verification
+* Verification resend
+* Login
+* Invalid login
+* Disabled user
+* Suspended user
+* Password reset
+* Password change
+* JWT signing
+* JWT verification
+* Invalid algorithm
+* Wrong issuer
+* Wrong audience
+* Expired token
+* JWKS
+* Signing-key rotation
+* Refresh-token hashing
+* Refresh rotation
+* Concurrent refresh
+* Reuse detection
+* Session revocation
+* Logout
+* Logout-all
+* Rate limits
+* MFA
+* Recovery codes
+* Roles
+* Permissions
+* Scopes
+* OAuth clients
+* PKCE
+* Client Credentials
+* OIDC discovery
+* Resend delivery
+* Resend retries
+* Resend webhooks
+* Webhook replay
+* Webhook duplicates
+* Security headers
+* Production settings
+* Health checks
+* Account-enumeration resistance
+
+Set a meaningful coverage threshold for:
+
+* Token services
+* Authentication services
+* Session services
+* MFA
+* OAuth
+* Resend notifications
+* Webhook processing
+
+---
+
+# 22. Code quality and CI
+
+Configure:
+
+* Ruff
+* Formatting
+* Static type checking
+* Django system checks
+* Migration consistency checks
+* pytest
+* Coverage
+* Dependency scanning
+* Secret scanning
+* Container scanning
+* GitHub Actions
+
+CI must fail when:
+
+* Formatting fails
+* Linting fails
+* Type checking fails
+* Tests fail
+* Coverage drops below threshold
+* Migrations are missing
+* Django deployment checks fail
+* Critical vulnerabilities are detected
+* Secrets are found
+* Docker image cannot build
+
+Run:
+
+```bash
+python manage.py check --deploy
+```
+
+against production settings with safe CI secrets.
+
+---
+
+# 23. Documentation
+
+Rewrite the README with:
+
+* Project purpose
+* Architecture
+* Trust boundaries
+* Authentication flows
+* OAuth/OIDC flows
+* Local setup
+* Docker setup
+* Environment variables
+* Resend setup
+* Resend domain verification
+* DNS configuration
+* API-key setup
+* Webhook setup
+* Webhook signature verification
+* Celery usage
+* Redis usage
+* PostgreSQL migrations
+* JWT signing-key generation
+* JWT signing-key rotation
+* Downstream JWT validation
+* Session revocation
+* Production deployment
+* Backup and recovery
+* Security-reporting process
+
+Add:
+
+* Architecture decision records
+* Threat model
+* API integration guide
+* Frontend PKCE example
+* Service Client Credentials example
+* Django downstream-validation example
+* Resend operations runbook
+* Resend API-key rotation runbook
+* Resend webhook troubleshooting guide
+* JWT-key rotation runbook
+* Incident-response runbook
+* Token-revocation runbook
+* Database recovery runbook
+
+---
+
+# 24. Required deliverables
+
+Produce:
+
+1. Current-state audit
+2. Risk-ranked security findings
+3. Threat model
+4. Target architecture
+5. Phased implementation plan
+6. Updated Django implementation
+7. Corrected token and session services
+8. OAuth/OIDC support
+9. MFA implementation
+10. Resend email integration
+11. Celery and Redis integration
+12. Resend webhook processing
+13. Database migrations
+14. Docker configuration
+15. Automated test suite
+16. GitHub Actions CI
+17. Updated README
+18. Operational runbooks
+19. Migration guide from the current API
+20. Final security review
+21. Remaining risks and deferred features
+
+---
+
+# 25. Acceptance criteria
+
+The task is complete only when all of the following are verified.
+
+## Application
+
+* The project starts from a clean checkout.
+* Documented Docker commands work.
+* PostgreSQL starts successfully.
+* Redis starts successfully.
+* Web service starts successfully.
+* Celery worker starts successfully.
+* Migrations run through a deliberate deployment step.
+* Production uses Gunicorn or an appropriate production server.
+* No container uses Django `runserver` in production.
+
+## Authentication
+
+* Registration works.
+* Email verification works.
+* Login works.
+* Password reset works.
+* Password change works.
+* MFA works.
+* Session listing works.
+* Single-session logout works.
+* Logout-all works.
+* Suspended accounts are blocked.
+
+## Tokens
+
+* Raw refresh tokens are returned only once.
+* Only refresh-token hashes are stored.
+* Rotation creates exactly one replacement token.
+* Rotation maintains the same session.
+* Concurrent refresh attempts cannot both succeed.
+* Reuse detection revokes the correct session or family.
+* JWT claims are validated correctly.
+* JWKS works.
+* Signing-key rotation is documented and tested.
+
+## OAuth/OIDC
+
+* Authorization Code with PKCE works.
+* Client Credentials works.
+* Discovery metadata works.
+* JWKS is discoverable.
+* Registered redirect URI enforcement works.
+* Client scopes are enforced.
+* Client secrets are hashed.
+
+## Resend
+
+* Production uses Resend.
+* Resend API keys are never committed.
+* Production requires a verified sending domain.
+* Authentication emails have HTML and plain-text versions.
+* Email tasks run through Celery.
+* Email tasks are dispatched after transaction commit.
+* Idempotency keys prevent duplicate sends.
+* Resend provider email IDs are persisted.
+* Webhook signatures are verified using the raw body.
+* Duplicate webhook events are ignored safely.
+* Out-of-order events are handled.
+* Bounce events are processed.
+* Complaint events are processed.
+* Failed and suppressed events are processed.
+* No OTP, reset token, or API key appears in logs.
+
+## Security
+
+* Redis-backed rate limiting works across instances.
+* Account enumeration protections pass.
+* Production configuration fails closed.
+* Django deployment checks pass.
+* Security headers are configured.
+* Private signing keys are not in Git.
+* Secrets are not present in Docker images.
+* Audit events are recorded.
+
+## Quality
+
+* Tests pass.
+* Coverage threshold passes.
+* CI passes.
+* Docker image builds.
+* Documentation matches the implementation.
+* Remaining limitations are documented honestly.
+
+Begin by auditing the repository. Produce the current-state report and implementation plan before changing architecture. Then implement the improvements in risk-priority order and verify every acceptance criterion with tests or documented deployment checks.

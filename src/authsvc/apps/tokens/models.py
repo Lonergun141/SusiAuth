@@ -1,7 +1,9 @@
-from django.db import models
 from django.conf import settings
+from django.db import models
 from django.utils import timezone
+
 from authsvc.apps.common.security import secure_random_token, sha256_hex
+
 
 class RefreshToken(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="refresh_tokens")

@@ -4,7 +4,9 @@ import json
 import os
 import time
 from typing import Any, Dict
+
 from django.conf import settings
+
 
 def b64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")

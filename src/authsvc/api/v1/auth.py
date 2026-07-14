@@ -1,5 +1,7 @@
 from ninja.security import HttpBearer
+
 from authsvc.apps.common.security import jwt_verify_rs256
+
 
 class AuthBearer(HttpBearer):
     def authenticate(self, request, token):
