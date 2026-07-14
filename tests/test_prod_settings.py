@@ -68,6 +68,15 @@ def test_localhost_frontend_url_rejected(monkeypatch):
         _load_prod()
 
 
+def test_resend_provider_requires_api_key_and_secret(monkeypatch):
+    _valid_env(monkeypatch)
+    monkeypatch.setenv("EMAIL_PROVIDER", "resend")
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.setenv("RESEND_WEBHOOK_SECRET", "whsec_x")
+    with pytest.raises(ImproperlyConfigured):
+        _load_prod()
+
+
 def test_valid_env_enables_security_hardening(monkeypatch):
     _valid_env(monkeypatch)
     prod = _load_prod()
@@ -82,6 +91,13 @@ def test_valid_env_enables_security_hardening(monkeypatch):
     assert prod.SESSION_COOKIE_HTTPONLY is True
     assert prod.CSRF_COOKIE_SECURE is True
     assert prod.X_FRAME_OPTIONS == "DENY"
+
+
+@pytest.fixture(autouse=True)
+def _skip_dotenv(monkeypatch):
+    # Reloading base.py must not repopulate env vars from a local .env, or the
+    # "missing config" assertions become non-deterministic.
+    monkeypatch.setenv("SKIP_DOTENV", "1")
 
 
 @pytest.fixture(autouse=True)

@@ -6,7 +6,6 @@ from django.utils import timezone
 from ninja.errors import HttpError
 
 from authsvc.apps.accounts.models import UserSession
-from authsvc.apps.common.emailer import send_auth_email
 from authsvc.apps.common.security import make_access_jwt, sha256_hex
 from authsvc.apps.tokens.models import OneTimeToken, RefreshToken
 
@@ -182,12 +181,9 @@ def consume_one_time_token(token_str: str, purpose: str):
     ott.save()
     return ott.user
 
-def send_verify_email(user, token: str):
-    link = settings.FRONTEND_VERIFY_EMAIL_URL.format(token=token)
-    body = f"Please verify your email here: {link}"
-    send_auth_email(user.email, "Verify your email", body)
+def send_reset_password_email(user, token: str, *, expiry_minutes: int):
+    # Lazy import avoids a heavy import chain at module load.
+    from authsvc.apps.notifications import services as email_services
 
-def send_reset_password_email(user, token: str):
     link = settings.FRONTEND_RESET_PASSWORD_URL.format(token=token)
-    body = f"Reset your password here: {link}"
-    send_auth_email(user.email, "Reset Password", body)
+    email_services.send_password_reset_email(user, link, expiry_minutes=expiry_minutes)

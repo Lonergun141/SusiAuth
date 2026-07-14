@@ -129,6 +129,7 @@ open  http://localhost:8000/api/docs            # interactive API docs
 | POST | `/api/auth/reset-password` | – | Reset via single-use token |
 | POST | `/api/auth/logout` / `/logout-all` | –/Bearer | Revoke session(s) |
 | GET  | `/api/.well-known/jwks.json` | – | Public keys for downstream verification |
+| POST | `/api/webhooks/resend` | Svix sig | Resend delivery events (bounce/complaint/etc.) |
 | GET  | `/api/health` · `/live` · `/ready` | – | Health / liveness / readiness |
 
 Per-endpoint request/response examples live in [`docs/postman/`](docs/postman/).
@@ -161,8 +162,12 @@ ruff check src tests         # lint
 | `DJANGO_ALLOWED_HOSTS` | `*` | Comma-separated; prod refuses `*` |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `authdb` / `authuser` / `authpass` | |
 | `DB_HOST` / `DB_PORT` | `db` / `5432` | Use `localhost` off-Docker |
-| `DEFAULT_FROM_EMAIL` | `no-reply@musngi.com` | Sender for auth emails |
-| `EMAIL_*` | SMTP defaults | Dev uses the console backend |
+| `EMAIL_PROVIDER` | `console` | `console` (dev) / `resend` / `inmemory` (tests) |
+| `DEFAULT_FROM_EMAIL` | `no-reply@susiauth.local` | Sender for auth emails |
+| `RESEND_API_KEY` | – | Required when `EMAIL_PROVIDER=resend` |
+| `RESEND_WEBHOOK_SECRET` | – | Svix secret; required for the webhook + prod resend |
+| `CELERY_TASK_ALWAYS_EAGER` | `0` (dev `1`) | Run email tasks inline without a broker |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Redis broker for the Celery worker |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | `auth-service` / `your-apps` | Validated by downstream |
 | `JWT_ACCESS_TTL_SECONDS` | `600` | Access-token lifetime |
 | `JWT_REFRESH_TTL_SECONDS` | `2592000` | Refresh-token lifetime (30d) |

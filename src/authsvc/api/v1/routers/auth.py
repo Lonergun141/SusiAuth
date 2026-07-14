@@ -22,8 +22,8 @@ from authsvc.api.v1.schemas import (
 )
 from authsvc.apps.accounts.models import EmailOTP, RegistrationField, User
 from authsvc.apps.accounts.utils import generate_otp_code
-from authsvc.apps.common.emailer import send_auth_email
 from authsvc.apps.common.pwned import check_password_complexity
+from authsvc.apps.notifications import services as email_services
 from authsvc.apps.tokens.models import OneTimeToken
 from authsvc.apps.tokens.services import (
     consume_one_time_token,
@@ -82,11 +82,7 @@ def register(request, data: RegisterIn):
         EmailOTP.objects.create(user=user, code_hash=sha256_hex(otp_code), expires_at=expiry)
     
     # Send Email
-    send_auth_email(
-        user.email,
-        "Verify your email",
-        f"Your verification code is: {otp_code}"
-    )
+    email_services.send_verification_email(user, otp_code, expiry_minutes=otp_ttl)
 
     return 201, {"message": "Registered. Please check your email for the verification code."}
 
@@ -157,11 +153,7 @@ def resend_verification(request, data: ResendVerificationIn):
     expiry = timezone.now() + timezone.timedelta(minutes=otp_ttl)
     EmailOTP.objects.create(user=user, code_hash=sha256_hex(otp_code), expires_at=expiry)
 
-    send_auth_email(
-        user.email,
-        "Verify your email",
-        f"Your verification code is: {otp_code}"
-    )
+    email_services.send_verification_email(user, otp_code, expiry_minutes=otp_ttl)
     
     return {"message": "If the account exists, we sent a code."}
 
@@ -234,6 +226,7 @@ def change_password(request, data: ChangePasswordIn):
     user.set_password(data.new_password)
     user.save(update_fields=["password", "updated_at"])
     revoke_all_refresh_tokens(user)
+    email_services.send_password_changed_email(user)
     return {"message": "Password changed"}
 
 
@@ -244,8 +237,9 @@ def forgot_password(request, data: EmailIn):
     if not user:
         return {"message": "If the account exists, we sent an email."}
 
-    token = create_one_time_token(user, OneTimeToken.PURPOSE_RESET_PASSWORD, ttl_minutes=30)
-    send_reset_password_email(user, token)
+    ttl = int(getattr(settings, "ONETIMETOKEN_TTL_MINUTES", 15))
+    token = create_one_time_token(user, OneTimeToken.PURPOSE_RESET_PASSWORD, ttl_minutes=ttl)
+    send_reset_password_email(user, token, expiry_minutes=ttl)
     return {"message": "If the account exists, we sent an email."}
 
 
@@ -262,4 +256,5 @@ def reset_password(request, data: ResetPasswordIn):
     user.set_password(data.new_password)
     user.save(update_fields=["password", "updated_at"])
     revoke_all_refresh_tokens(user)
+    email_services.send_password_changed_email(user)
     return {"message": "Password reset successful"}

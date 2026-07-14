@@ -3,15 +3,18 @@
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
 # Notes:
-#   * Postgres is NOT published to the host — only reachable on the internal
-#     network. Put a TLS-terminating reverse proxy / load balancer in front of
-#     `web` for HTTPS.
+#   * Postgres and Redis are NOT published to the host — only reachable on the
+#     internal network. Put a TLS-terminating reverse proxy / load balancer in
+#     front of `web` for HTTPS.
 #   * Migrations run once in a dedicated `migrate` service; the web container
 #     never migrates on boot and can scale to multiple replicas.
+#   * Email is delivered by the `worker` (Celery) via Redis + Resend — the web
+#     process only enqueues.
 #   * Signing keys are mounted read-only; they are never baked into the image.
 #   * Requires a `.env` with production values (DJANGO_SECRET_KEY,
-#     DJANGO_ALLOWED_HOSTS, DB_*, JWT_*, email, etc.). prod settings fail fast
-#     if required values are missing.
+#     DJANGO_ALLOWED_HOSTS, DB_*, JWT_*, EMAIL_PROVIDER=resend, RESEND_API_KEY,
+#     RESEND_WEBHOOK_SECRET, ...). prod settings fail fast if required values
+#     are missing.
 services:
   db:
     image: postgres:16
@@ -23,6 +26,17 @@ services:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,8 +63,11 @@ services:
     environment:
       - DB_HOST=db
       - DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
+      - CELERY_BROKER_URL=redis://redis:6379/0
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -66,5 +83,25 @@ services:
       retries: 3
     restart: unless-stopped
 
+  worker:
+    build: .
+    command: celery -A authsvc.config worker -l info --concurrency 4
+    env_file: .env
+    environment:
+      - DB_HOST=db
+      - DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./keys:/app/keys:ro
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  redisdata:
