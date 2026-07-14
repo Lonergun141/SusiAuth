@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "oauth2_provider",
     "anymail",
     "authsvc.apps.accounts",
     "authsvc.apps.tokens",
@@ -151,3 +152,37 @@ MFA_RECOVERY_CODE_COUNT = int(os.getenv("MFA_RECOVERY_CODE_COUNT", "10"))
 # TOTP secrets are encrypted at rest with a key derived from this value
 # (defaults to SECRET_KEY). Set a dedicated value to rotate independently.
 MFA_SECRET_ENCRYPTION_KEY = os.getenv("MFA_SECRET_ENCRYPTION_KEY", "")
+
+# --- OAuth 2.1 / OIDC (django-oauth-toolkit) ---------------------------------
+# The OIDC id_tokens are signed with the same RSA key as our first-party JWTs,
+# so downstream consumers can use one trust root. Tests inject an ephemeral key
+# via the jwt_keys fixture (the file may not exist at settings-import time).
+try:
+    with open(JWT_PRIVATE_KEY_PATH) as _key_file:
+        _OIDC_RSA_PRIVATE_KEY = _key_file.read()
+except OSError:
+    _OIDC_RSA_PRIVATE_KEY = ""
+
+OAUTH2_PROVIDER = {
+    "OIDC_ENABLED": True,
+    "OIDC_RSA_PRIVATE_KEY": _OIDC_RSA_PRIVATE_KEY,
+    # OAuth 2.1: PKCE mandatory for the authorization-code grant.
+    "PKCE_REQUIRED": True,
+    "ROTATE_REFRESH_TOKEN": True,
+    "ACCESS_TOKEN_EXPIRE_SECONDS": int(os.getenv("OAUTH_ACCESS_TOKEN_TTL", "3600")),
+    "REFRESH_TOKEN_EXPIRE_SECONDS": int(os.getenv("OAUTH_REFRESH_TOKEN_TTL", "2592000")),
+    "SCOPES": {
+        "openid": "OpenID Connect",
+        "profile": "Basic profile",
+        "email": "Email address",
+        "read": "Read access",
+        "write": "Write access",
+    },
+    "OAUTH2_VALIDATOR_CLASS": "authsvc.apps.oauth.validators.CustomOAuth2Validator",
+    # Restrict client-supplied redirect URIs to https (http allowed for local dev).
+    "ALLOWED_REDIRECT_URI_SCHEMES": os.getenv(
+        "OAUTH_REDIRECT_SCHEMES", "https,http"
+    ).split(","),
+}
+# The browser authorization flow needs a login page for the resource owner.
+LOGIN_URL = "/accounts/login/"

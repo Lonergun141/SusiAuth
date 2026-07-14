@@ -40,6 +40,17 @@ def jwt_keys(tmp_path_factory):
     # settings tests) resolves the same keys instead of the default paths.
     os.environ["JWT_PRIVATE_KEY_PATH"] = str(priv_path)
     os.environ["JWT_PUBLIC_KEY_PATH"] = str(pub_path)
+
+    # OIDC (django-oauth-toolkit) signs id_tokens with the same key. The key
+    # file doesn't exist at settings-import time in tests, so inject it here.
+    priv_pem = priv_path.read_text()
+    settings.OAUTH2_PROVIDER = {**settings.OAUTH2_PROVIDER, "OIDC_RSA_PRIVATE_KEY": priv_pem}
+    try:
+        from oauth2_provider.settings import oauth2_settings
+
+        oauth2_settings.OIDC_RSA_PRIVATE_KEY = priv_pem
+    except Exception:
+        pass
     yield
 
 

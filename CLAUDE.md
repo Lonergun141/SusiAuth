@@ -32,6 +32,7 @@ src/authsvc/
     accounts/           User (custom, email login), UserSession, RegistrationField, EmailOTP
     tokens/             RefreshToken, OneTimeToken + services.py (token lifecycle)
     mfa/                TOTPDevice, RecoveryCode + services.py (TOTP enroll/verify)
+    oauth/              validators.py (custom OIDC claims for django-oauth-toolkit)
     notifications/      EmailProvider, OutboundEmail/WebhookEvent, Celery task, templates
     common/             security.py (JWT/JWKS/hashing), pwned.py (HIBP check)
     audit/              audit models/services (stubs)
@@ -64,6 +65,26 @@ if `DJANGO_SECRET_KEY` is missing/default, `DJANGO_ALLOWED_HOSTS` is empty/wildc
 missing, the frontend URLs are localhost, or (when `EMAIL_PROVIDER=resend`) `RESEND_API_KEY` /
 `RESEND_WEBHOOK_SECRET` are missing. It also sets HSTS, secure/HttpOnly cookies, SSL redirect,
 proxy SSL header, and nosniff/frame/referrer headers.
+
+## OAuth 2.1 / OIDC (`django-oauth-toolkit`, mounted at `/o/`)
+
+Third-party client authorization is handled by **django-oauth-toolkit (DOT)** — a mature library, not
+a hand-rolled server (per the brief). First-party auth (`/api/auth/*`, RS256 JWTs) is unchanged; DOT
+is for *clients* (web/mobile/service integrations).
+
+- **Endpoints** (`/o/`): `authorize`, `token`, `revoke_token`, `introspect`, `userinfo`,
+  `.well-known/openid-configuration`, `.well-known/jwks.json`. Use `reverse("oauth2_provider:<name>")`.
+- **Flows:** Authorization Code **+ PKCE** (`PKCE_REQUIRED=True`, OAuth 2.1) and Client Credentials.
+  The **password (ROPC) grant is not used**. Redirect URIs are enforced by DOT; secrets are hashed.
+- **OIDC:** `OIDC_ENABLED`, id_tokens signed **RS256 with the same key as our first-party JWTs**
+  (`OIDC_RSA_PRIVATE_KEY` loaded from `JWT_PRIVATE_KEY_PATH`). Per-client, set `algorithm="RS256"` for
+  signed id_tokens. Custom claims (email/profile) come from `apps/oauth/validators.py`.
+- **Access tokens are opaque** (validated via `userinfo`/introspection); the **id_token** is the JWT
+  downstreams verify via `/o/.well-known/jwks.json`. First-party access tokens remain RS256 JWTs.
+- **Clients** are created via Django admin or `python manage.py createapplication`. The authorization
+  (consent) flow needs a browser session — a minimal `/accounts/login/` page is provided.
+- **Known limitations:** two JWKS endpoints exist (`/api/.well-known/jwks.json` for first-party,
+  `/o/.well-known/jwks.json` for OIDC) — same key, different URLs; no consent-screen customization yet.
 
 ## MFA (`apps/mfa`) — TOTP
 

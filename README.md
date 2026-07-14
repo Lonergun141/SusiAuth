@@ -132,11 +132,27 @@ open  http://localhost:8000/api/docs            # interactive API docs
 | POST | `/api/auth/forgot-password` | – | Send reset link |
 | POST | `/api/auth/reset-password` | – | Reset via single-use token |
 | POST | `/api/auth/logout` / `/logout-all` | –/Bearer | Revoke session(s) |
+| GET/POST | `/o/authorize` · `/o/token` | – | OAuth 2.1: auth-code+PKCE / client-credentials |
+| GET  | `/o/userinfo` · `/o/.well-known/openid-configuration` · `/o/.well-known/jwks.json` | – | OIDC |
 | GET  | `/api/.well-known/jwks.json` | – | Public keys for downstream verification |
 | POST | `/api/webhooks/resend` | Svix sig | Resend delivery events (bounce/complaint/etc.) |
 | GET  | `/api/health` · `/live` · `/ready` | – | Health / liveness / readiness |
 
 Per-endpoint request/response examples live in [`docs/postman/`](docs/postman/).
+
+### OAuth 2.1 / OIDC clients
+
+Third-party apps integrate via OAuth (django-oauth-toolkit) under `/o/`. Register a client:
+
+```bash
+# Confidential client, authorization-code + PKCE, RS256-signed id_tokens:
+python manage.py createapplication confidential authorization-code \
+  --name "My App" --redirect-uris "https://myapp.example/callback" --algorithm RS256
+# Service-to-service:
+python manage.py createapplication confidential client-credentials --name "My Service"
+```
+
+Discovery: `GET /o/.well-known/openid-configuration`. See [`docs/postman/13_oauth.md`](docs/postman/13_oauth.md).
 
 ---
 
@@ -175,6 +191,8 @@ ruff check src tests         # lint
 | `MFA_ISSUER_NAME` | `SusiAuth` | Issuer shown in authenticator apps |
 | `MFA_CHALLENGE_TTL_SECONDS` | `300` | Lifetime of the post-password MFA challenge |
 | `MFA_SECRET_ENCRYPTION_KEY` | `SECRET_KEY` | Key for encrypting TOTP secrets at rest |
+| `OAUTH_ACCESS_TOKEN_TTL` / `OAUTH_REFRESH_TOKEN_TTL` | `3600` / `2592000` | OAuth token lifetimes |
+| `OAUTH_REDIRECT_SCHEMES` | `https,http` | Allowed client redirect-URI schemes (drop `http` in prod) |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | `auth-service` / `your-apps` | Validated by downstream |
 | `JWT_ACCESS_TTL_SECONDS` | `600` | Access-token lifetime |
 | `JWT_REFRESH_TTL_SECONDS` | `2592000` | Refresh-token lifetime (30d) |
