@@ -1,19 +1,61 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+
+# --- Build stage: compile wheels ---------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-# Add src to PYTHONPATH so python can find authsvc
-ENV PYTHONPATH=/app/src
 
-RUN apt-get update && apt-get install -y build-essential openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+
+# --- Runtime stage -----------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
+
+WORKDIR /app
+
+# curl is only needed for the container HEALTHCHECK. psycopg[binary] bundles
+# libpq, so no system Postgres client libraries are required.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system app \
+    && useradd --system --gid app --home-dir /app app
+
+COPY --from=builder /wheels /wheels
+COPY requirements.txt .
+RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt \
+    && rm -rf /wheels
 
 COPY . .
+RUN chown -R app:app /app
 
-# Use the new settings path. 
-# Also updated the CMD to correct manage.py usage with the module path implicitly via python manage.py
-# Or better: python manage.py directly since we are in /app and manage.py is there.
-CMD ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
+USER app
+
+EXPOSE 8000
+
+# Liveness probe — process is up. Readiness (DB + keys) is checked by the
+# orchestrator via /api/health/ready.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:8000/api/health/live || exit 1
+
+# Production server. Migrations are run as a separate step (see
+# docker-compose.prod.yml), never implicitly from the web container.
+CMD ["gunicorn", "authsvc.config.wsgi:application", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "3", \
+     "--timeout", "60", \
+     "--graceful-timeout", "30", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-"]

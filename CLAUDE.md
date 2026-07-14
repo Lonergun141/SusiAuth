@@ -5,8 +5,13 @@ Guidance for working in this repository.
 ## What this is
 
 **SusiAuth** is a reusable, centralized authentication service (identity provider) built with
-**Django 5 + Django Ninja**. It issues **RS256 JWTs** and exposes a versioned REST API under
-`/api/v1`. Other apps/microservices verify tokens statelessly via the published JWKS endpoint.
+**Django 5 + Django Ninja**. It issues **RS256 JWTs** and exposes a REST API. Other
+apps/microservices verify tokens statelessly via the published JWKS endpoint.
+
+> **API prefix:** despite the `api/v1/` package name and `api_v1` NinjaAPI object, `config/urls.py`
+> mounts it at `path("api/", ...)`, so live routes are under **`/api`** (e.g. `/api/auth/login`,
+> `/api/health`, `/api/.well-known/jwks.json`) — *not* `/api/v1`. Wiring the real `/v1` prefix is
+> part of the still-pending API-design workstream.
 
 ## Layout
 
@@ -38,8 +43,22 @@ tests/                  pytest stubs (conftest + test_auth_flow are currently pl
 Docker is the primary path:
 
 ```bash
-docker compose up --build      # runs migrate + runserver on :8000; Postgres on :5432
+docker compose up --build      # DEV: runs migrate + runserver on :8000; Postgres on :5432
 ```
+
+The image itself is production-oriented: multi-stage build, non-root `app` user, and a Gunicorn
+`CMD` defaulting to `DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod`. The dev `docker-compose.yml`
+overrides that with runserver + dev settings + a source mount. `docker-compose.prod.yml` is a
+production-shaped example: a one-off `migrate` service (the web container never migrates on boot),
+DB not published to the host, read-only key mount, healthchecks, restart policies.
+
+**Health endpoints:** `/api/health` (basic), `/api/health/live` (liveness, no deps),
+`/api/health/ready` (readiness — checks DB + JWT signing keys, returns 503 if unavailable).
+
+**Production settings fail fast:** `config/settings/prod.py` raises `ImproperlyConfigured` on import
+if `DJANGO_SECRET_KEY` is missing/default, `DJANGO_ALLOWED_HOSTS` is empty/wildcard, JWT key files are
+missing, or the frontend URLs are localhost. It also sets HSTS, secure/HttpOnly cookies, SSL redirect,
+proxy SSL header, and nosniff/frame/referrer headers.
 
 Local (without Docker):
 
