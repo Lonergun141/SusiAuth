@@ -1,7 +1,7 @@
 # Login
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/login`
+**URL**: `{{base_url}}/api/v1/auth/login`
 
 ## Headers
 - `Content-Type`: `application/json`

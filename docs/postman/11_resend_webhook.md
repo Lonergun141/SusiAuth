@@ -4,7 +4,7 @@ Receives email delivery events from Resend (delivered, bounced, complained,
 failed, suppressed, ...). Called by Resend, not by clients.
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/webhooks/resend`
+**URL**: `{{base_url}}/api/v1/webhooks/resend`
 
 ## Headers
 - `Content-Type`: `application/json`

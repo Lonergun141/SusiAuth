@@ -100,7 +100,7 @@ def test_disable_clears_everything(user):
 # --- endpoints ---------------------------------------------------------------
 def _login(client, email):
     return client.post(
-        "/api/auth/login",
+        "/api/v1/auth/login",
         data=json.dumps({"email": email, "password": PASSWORD}),
         content_type="application/json",
     ).json()
@@ -115,6 +115,8 @@ def test_login_without_mfa_returns_tokens(client, user):
 
 @pytest.mark.django_db
 def test_login_with_mfa_returns_challenge_then_tokens(client, user):
+    from authsvc.apps.audit.models import AuditEvent
+
     secret, _ = services.start_enrollment(user)
     services.confirm_enrollment(user, _totp(secret))
 
@@ -124,13 +126,16 @@ def test_login_with_mfa_returns_challenge_then_tokens(client, user):
     assert body["access_token"] is None  # no tokens until the 2nd factor
 
     resp = client.post(
-        "/api/auth/mfa/verify",
+        "/api/v1/auth/mfa/verify",
         data=json.dumps({"mfa_token": body["mfa_token"], "code": _totp(secret)}),
         content_type="application/json",
     )
     assert resp.status_code == 200
     tokens = resp.json()
     assert tokens["access_token"] and tokens["refresh_token"]
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.LOGIN_SUCCESS
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -140,7 +145,7 @@ def test_mfa_verify_rejects_bad_code(client, user):
     body = _login(client, user.email)
 
     resp = client.post(
-        "/api/auth/mfa/verify",
+        "/api/v1/auth/mfa/verify",
         data=json.dumps({"mfa_token": body["mfa_token"], "code": "000000"}),
         content_type="application/json",
     )
@@ -149,17 +154,18 @@ def test_mfa_verify_rejects_bad_code(client, user):
 
 @pytest.mark.django_db
 def test_setup_and_confirm_endpoints(client, user):
+    from authsvc.apps.audit.models import AuditEvent
     from authsvc.apps.common.security import make_access_jwt
 
     headers = {"Authorization": f"Bearer {make_access_jwt(str(user.uuid), user.email)}"}
 
-    r = client.post("/api/auth/mfa/setup", content_type="application/json", headers=headers)
+    r = client.post("/api/v1/auth/mfa/setup", content_type="application/json", headers=headers)
     assert r.status_code == 200
     secret = r.json()["secret"]
     assert r.json()["otpauth_uri"].startswith("otpauth://")
 
     r2 = client.post(
-        "/api/auth/mfa/confirm",
+        "/api/v1/auth/mfa/confirm",
         data=json.dumps({"code": _totp(secret)}),
         content_type="application/json",
         headers=headers,
@@ -168,3 +174,6 @@ def test_setup_and_confirm_endpoints(client, user):
     assert len(r2.json()["recovery_codes"]) == 10
     user.refresh_from_db()
     assert user.mfa_enabled
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.MFA_ENROLLMENT
+    ).exists()

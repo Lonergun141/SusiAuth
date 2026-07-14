@@ -13,5 +13,5 @@ urlpatterns = [
     # OAuth 2.1 / OIDC endpoints: /o/authorize, /o/token, /o/userinfo,
     # /o/.well-known/openid-configuration, /o/.well-known/jwks.json, ...
     path("o/", include("oauth2_provider.urls", namespace="oauth2_provider")),
-    path("api/", api_v1.urls),
+    path("api/v1/", api_v1.urls),
 ]

@@ -14,7 +14,11 @@ from django.db import connection
 from authsvc.apps.accounts.models import UserSession
 from authsvc.apps.common.security import jwt_verify_rs256, sha256_hex
 from authsvc.apps.tokens.models import RefreshToken
-from authsvc.apps.tokens.services import issue_token_pair, rotate_refresh_token
+from authsvc.apps.tokens.services import (
+    issue_token_pair,
+    revoke_all_refresh_tokens,
+    rotate_refresh_token,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -69,6 +73,8 @@ def test_rotation_keeps_same_session_and_single_replacement(user):
 
 
 def test_reuse_of_revoked_token_revokes_family(user):
+    from authsvc.apps.audit.models import AuditEvent
+
     _, raw1 = issue_token_pair(user, request=None)
     _, _, raw2 = rotate_refresh_token(raw1, request=None)  # raw1 now revoked
 
@@ -82,6 +88,12 @@ def test_reuse_of_revoked_token_revokes_family(user):
     assert RefreshToken.objects.filter(revoked_at__isnull=True).count() == 0
     with pytest.raises(ValueError):
         rotate_refresh_token(raw2, request=None)
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.REFRESH_TOKEN_REUSE
+    ).exists()
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.SESSION_REVOCATION
+    ).exists()
 
 
 def test_unknown_token_raises(user):
@@ -105,6 +117,16 @@ def test_expired_token_rejected(user):
 
     with pytest.raises(ValueError, match="expired"):
         rotate_refresh_token(raw, request=None)
+
+
+def test_revoke_all_deactivates_sessions_and_refresh_tokens(user):
+    issue_token_pair(user, request=None)
+    issue_token_pair(user, request=None)
+
+    revoke_all_refresh_tokens(user)
+
+    assert UserSession.objects.filter(user=user, is_active=True).count() == 0
+    assert RefreshToken.objects.filter(user=user, revoked_at__isnull=True).count() == 0
 
 
 @pytest.mark.django_db(transaction=True)

@@ -13,6 +13,8 @@ from authsvc.api.v1.schemas import (
     TokenOut,
 )
 from authsvc.apps.accounts.models import User
+from authsvc.apps.audit.models import AuditEvent
+from authsvc.apps.audit.services import record_event
 from authsvc.apps.common.security import verify_mfa_challenge
 from authsvc.apps.mfa import services as mfa_services
 from authsvc.apps.notifications import services as email_services
@@ -53,8 +55,22 @@ def confirm(request, data: MfaConfirmIn):
     user = _current_user(request)
     codes = mfa_services.confirm_enrollment(user, data.code)
     if codes is None:
+        record_event(
+            AuditEvent.EventType.MFA_ENROLLMENT,
+            result=AuditEvent.Result.FAILURE,
+            actor=user,
+            target=user,
+            request=request,
+            metadata={"reason": "invalid_code"},
+        )
         raise HttpError(400, "Invalid or expired code")
     email_services.send_mfa_enabled_email(user)
+    record_event(
+        AuditEvent.EventType.MFA_ENROLLMENT,
+        actor=user,
+        target=user,
+        request=request,
+    )
     return {"recovery_codes": codes}
 
 
@@ -71,6 +87,12 @@ def disable(request, data: MfaReauthIn):
         raise HttpError(400, "Invalid code")
     mfa_services.disable(user)
     email_services.send_mfa_disabled_email(user)
+    record_event(
+        AuditEvent.EventType.MFA_REMOVAL,
+        actor=user,
+        target=user,
+        request=request,
+    )
     return {"message": "MFA disabled"}
 
 
@@ -107,6 +129,19 @@ def verify(request, data: MfaVerifyIn):
         raise HttpError(401, "Invalid code")
     if factor == "recovery":
         email_services.send_mfa_recovery_used_email(user)
+        record_event(
+            AuditEvent.EventType.RECOVERY_CODE_USAGE,
+            actor=user,
+            target=user,
+            request=request,
+        )
 
     access, refresh = issue_token_pair(user, request)
+    record_event(
+        AuditEvent.EventType.LOGIN_SUCCESS,
+        actor=user,
+        target=user,
+        request=request,
+        metadata={"factor": factor},
+    )
     return {"access_token": access, "refresh_token": refresh}

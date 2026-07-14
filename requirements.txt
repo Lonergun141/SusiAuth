@@ -9,6 +9,7 @@ requests>=2.32.5
 django-ratelimit>=4.1
 celery>=5.3
 redis>=5.0
+django-redis>=5.4
 django-anymail[resend]>=11.0
 svix>=1.20
 pyotp>=2.9

@@ -1,7 +1,7 @@
 # Logout
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/logout`
+**URL**: `{{base_url}}/api/v1/auth/logout`
 
 ## Headers
 - `Content-Type`: `application/json`

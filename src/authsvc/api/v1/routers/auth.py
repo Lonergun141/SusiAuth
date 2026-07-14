@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django_ratelimit.decorators import ratelimit
-from ninja import Router
+from ninja import Router, Status
 from ninja.errors import HttpError
 
 from authsvc.api.v1.auth import auth
@@ -23,6 +23,8 @@ from authsvc.api.v1.schemas import (
 )
 from authsvc.apps.accounts.models import EmailOTP, RegistrationField, User
 from authsvc.apps.accounts.utils import generate_otp_code
+from authsvc.apps.audit.models import AuditEvent
+from authsvc.apps.audit.services import record_event
 from authsvc.apps.common.pwned import check_password_complexity
 from authsvc.apps.common.security import make_mfa_challenge
 from authsvc.apps.notifications import services as email_services
@@ -40,6 +42,23 @@ from authsvc.apps.tokens.services import (
 router = Router(tags=["auth"])
 
 
+def _account_target(email: str):
+    """Stable target for an unknown account without storing the email address."""
+    from authsvc.apps.common.security import sha256_hex
+
+    return ("account_identifier", sha256_hex(email.strip().lower()))
+
+
+def _audit_failure(event_type, request, target, reason):
+    record_event(
+        event_type,
+        result=AuditEvent.Result.FAILURE,
+        request=request,
+        target=target,
+        metadata={"reason": reason},
+    )
+
+
 @router.get("/registration-fields", response=list[RegistrationFieldOut])
 def get_registration_fields(request):
     return RegistrationField.objects.filter(is_active=True)
@@ -49,6 +68,12 @@ def get_registration_fields(request):
 @ratelimit(key="ip", rate="3/m", block=True)
 def register(request, data: RegisterIn):
     if User.objects.filter(email__iexact=data.email).exists():
+        _audit_failure(
+            AuditEvent.EventType.REGISTRATION,
+            request,
+            _account_target(data.email),
+            "account_exists",
+        )
         raise HttpError(400, "Email already registered")
 
     check_password_complexity(data.password)
@@ -85,8 +110,17 @@ def register(request, data: RegisterIn):
     
     # Send Email
     email_services.send_verification_email(user, otp_code, expiry_minutes=otp_ttl)
+    record_event(
+        AuditEvent.EventType.REGISTRATION,
+        actor=user,
+        target=user,
+        request=request,
+    )
 
-    return 201, {"message": "Registered. Please check your email for the verification code."}
+    return Status(
+        201,
+        {"message": "Registered. Please check your email for the verification code."},
+    )
 
 
 @router.post("/verify-email", response={200: TokenOut})
@@ -95,6 +129,12 @@ def verify_email(request, data: VerifyEmailIn):
     try:
         user = User.objects.get(email__iexact=data.email)
     except User.DoesNotExist:
+        _audit_failure(
+            AuditEvent.EventType.VERIFICATION,
+            request,
+            _account_target(data.email),
+            "invalid_account_or_code",
+        )
         raise HttpError(400, "Invalid email or code")
 
     from authsvc.apps.common.security import sha256_hex
@@ -107,15 +147,18 @@ def verify_email(request, data: VerifyEmailIn):
     ).order_by('-created_at').first()
 
     if not otp:
+        _audit_failure(AuditEvent.EventType.VERIFICATION, request, user, "expired_code")
         raise HttpError(400, "Invalid or expired code")
     
     if otp.attempts >= 3:
+         _audit_failure(AuditEvent.EventType.VERIFICATION, request, user, "attempt_limit")
          raise HttpError(400, "Too many failed attempts. Request a new code.")
          
     # Check Code
     if otp.code_hash != sha256_hex(data.code):
         otp.attempts += 1
         otp.save(update_fields=["attempts"])
+        _audit_failure(AuditEvent.EventType.VERIFICATION, request, user, "invalid_code")
         raise HttpError(400, "Invalid code")
 
     # Mark verified
@@ -130,6 +173,12 @@ def verify_email(request, data: VerifyEmailIn):
     # Clear other OTPs? Optional.
 
     access, refresh = issue_token_pair(user, request)
+    record_event(
+        AuditEvent.EventType.VERIFICATION,
+        actor=user,
+        target=user,
+        request=request,
+    )
     return {"access_token": access, "refresh_token": refresh}
 
 
@@ -167,19 +216,37 @@ def login(request, data: LoginIn):
 
     if user and user.check_password(data.password):
         if not user.is_email_verified:
+            _audit_failure(
+                AuditEvent.EventType.LOGIN_FAILURE, request, user, "email_unverified"
+            )
             raise HttpError(401, "Email is not verified. Please verify your email address.")
 
         if not user.is_active:
+            _audit_failure(
+                AuditEvent.EventType.LOGIN_FAILURE, request, user, "account_disabled"
+            )
             raise HttpError(401, "Account is disabled.")
 
         # MFA users get a short-lived challenge instead of tokens; they must
-        # complete POST /api/auth/mfa/verify with a code to receive tokens.
+        # complete POST /api/v1/auth/mfa/verify with a code to receive tokens.
         if user.mfa_enabled:
             return {"mfa_required": True, "mfa_token": make_mfa_challenge(str(user.uuid))}
 
         access, refresh = issue_token_pair(user, request)
+        record_event(
+            AuditEvent.EventType.LOGIN_SUCCESS,
+            actor=user,
+            target=user,
+            request=request,
+        )
         return {"mfa_required": False, "access_token": access, "refresh_token": refresh}
 
+    _audit_failure(
+        AuditEvent.EventType.LOGIN_FAILURE,
+        request,
+        user or _account_target(data.email),
+        "invalid_credentials",
+    )
     raise HttpError(401, "Invalid credentials")
 
 
@@ -187,16 +254,39 @@ def login(request, data: LoginIn):
 @ratelimit(key="ip", rate="20/m", block=True)
 def refresh(request, data: RefreshIn):
     try:
-        _user, access, new_refresh = rotate_refresh_token(data.refresh_token, request)
+        user, access, new_refresh = rotate_refresh_token(data.refresh_token, request)
     except ValueError as e:
+        _audit_failure(
+            AuditEvent.EventType.REFRESH_FAILURE,
+            request,
+            ("refresh_token", "redacted"),
+            str(e),
+        )
         raise HttpError(401, "Invalid refresh token") from e
 
+    record_event(
+        AuditEvent.EventType.REFRESH_SUCCESS,
+        actor=user,
+        target=user,
+        request=request,
+    )
     return {"access_token": access, "refresh_token": new_refresh}
 
 
 @router.post("/logout", response={200: dict})
 def logout(request, data: LogoutIn):
-    revoke_refresh_token(data.refresh_token)
+    refresh_token = revoke_refresh_token(data.refresh_token)
+    target = refresh_token.user if refresh_token else ("session", "unknown")
+    actor = getattr(refresh_token, "user", None)
+    record_event(
+        AuditEvent.EventType.LOGOUT, actor=actor, target=target, request=request
+    )
+    record_event(
+        AuditEvent.EventType.SESSION_REVOCATION,
+        actor=actor,
+        target=target,
+        request=request,
+    )
     return {"message": "Logged out"}
 
 
@@ -205,6 +295,16 @@ def logout_all(request):
     user_uuid = request.jwt["sub"]
     user = User.objects.get(uuid=user_uuid)
     revoke_all_refresh_tokens(user)
+    record_event(
+        AuditEvent.EventType.LOGOUT_ALL, actor=user, target=user, request=request
+    )
+    record_event(
+        AuditEvent.EventType.SESSION_REVOCATION,
+        actor=user,
+        target=user,
+        request=request,
+        metadata={"scope": "all"},
+    )
     return {"message": "Logged out of all sessions"}
 
 
@@ -227,6 +327,12 @@ def change_password(request, data: ChangePasswordIn):
     user_uuid = request.jwt["sub"]
     user = User.objects.get(uuid=user_uuid)
     if not user.check_password(data.current_password):
+        _audit_failure(
+            AuditEvent.EventType.PASSWORD_CHANGE,
+            request,
+            user,
+            "incorrect_password",
+        )
         raise HttpError(400, "Current password incorrect")
 
     check_password_complexity(data.new_password)
@@ -235,6 +341,16 @@ def change_password(request, data: ChangePasswordIn):
     user.save(update_fields=["password", "updated_at"])
     revoke_all_refresh_tokens(user)
     email_services.send_password_changed_email(user)
+    record_event(
+        AuditEvent.EventType.PASSWORD_CHANGE, actor=user, target=user, request=request
+    )
+    record_event(
+        AuditEvent.EventType.SESSION_REVOCATION,
+        actor=user,
+        target=user,
+        request=request,
+        metadata={"reason": "password_change"},
+    )
     return {"message": "Password changed"}
 
 
@@ -265,4 +381,14 @@ def reset_password(request, data: ResetPasswordIn):
     user.save(update_fields=["password", "updated_at"])
     revoke_all_refresh_tokens(user)
     email_services.send_password_changed_email(user)
+    record_event(
+        AuditEvent.EventType.PASSWORD_RESET, actor=user, target=user, request=request
+    )
+    record_event(
+        AuditEvent.EventType.SESSION_REVOCATION,
+        actor=user,
+        target=user,
+        request=request,
+        metadata={"reason": "password_reset"},
+    )
     return {"message": "Password reset successful"}

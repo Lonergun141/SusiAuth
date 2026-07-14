@@ -1,7 +1,7 @@
 # Register User
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/register`
+**URL**: `{{base_url}}/api/v1/auth/register`
 
 ## Headers
 - `Content-Type`: `application/json`

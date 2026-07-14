@@ -1,7 +1,7 @@
 # Reset Password
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/reset-password`
+**URL**: `{{base_url}}/api/v1/auth/reset-password`
 
 ## Headers
 - `Content-Type`: `application/json`

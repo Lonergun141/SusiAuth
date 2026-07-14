@@ -20,6 +20,7 @@ class EmailMessageData:
     html: str | None = None
     from_email: str | None = None
     headers: dict = field(default_factory=dict)
+    idempotency_key: str = ""
 
 
 @dataclass
@@ -56,6 +57,9 @@ class DjangoMailProvider:
         )
         if message.html:
             email.attach_alternative(message.html, "text/html")
+        # Consumed by our Resend backend as an HTTP request header. Keeping it
+        # off ``extra_headers`` prevents it becoming a MIME header instead.
+        email.resend_idempotency_key = message.idempotency_key
         email.send()
 
         message_id = None

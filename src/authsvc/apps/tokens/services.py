@@ -6,6 +6,8 @@ from django.utils import timezone
 from ninja.errors import HttpError
 
 from authsvc.apps.accounts.models import UserSession
+from authsvc.apps.audit.models import AuditEvent
+from authsvc.apps.audit.services import record_event
 from authsvc.apps.common.security import make_access_jwt, sha256_hex
 from authsvc.apps.tokens.models import OneTimeToken, RefreshToken
 
@@ -135,6 +137,21 @@ def rotate_refresh_token(token_str: str, request) -> tuple[object, str, str]:
             )
 
     if reused:
+        record_event(
+            AuditEvent.EventType.REFRESH_TOKEN_REUSE,
+            result=AuditEvent.Result.FAILURE,
+            actor=refresh_obj.user,
+            target=refresh_obj.session or refresh_obj.user,
+            request=request,
+            metadata={"action": "session_revoked"},
+        )
+        record_event(
+            AuditEvent.EventType.SESSION_REVOCATION,
+            actor=refresh_obj.user,
+            target=refresh_obj.session or refresh_obj.user,
+            request=request,
+            metadata={"reason": "refresh_token_reuse"},
+        )
         raise ValueError("Token revoked (reuse detected)")
 
     return user, access, new_refresh.raw_token
@@ -149,11 +166,14 @@ def revoke_refresh_token(token_str: str):
         if refresh_obj.session:
             refresh_obj.session.is_active = False
             refresh_obj.session.save()
+        return refresh_obj
     except RefreshToken.DoesNotExist:
-        pass
+        return None
 
 def revoke_all_refresh_tokens(user):
-    user.refresh_tokens.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
+    revoked_at = timezone.now()
+    user.refresh_tokens.filter(revoked_at__isnull=True).update(revoked_at=revoked_at)
+    user.sessions.filter(is_active=True).update(is_active=False)
 
 def create_one_time_token(user, purpose: str, ttl_minutes: int = 30) -> str:
     expires_at = timezone.now() + timedelta(minutes=ttl_minutes)

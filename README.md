@@ -14,18 +14,19 @@ via the published JWKS endpoint.
 - Refresh-token rotation with reuse detection (tokens stored hashed)
 - Email verification (OTP) and forgot/reset/change password
 - Logout (single session and all sessions)
-- Per-IP rate limiting, HaveIBeenPwned password check
+- Redis-backed distributed rate limiting, HaveIBeenPwned password check
+- Append-only, secret-sanitized security audit events
 - PostgreSQL, Dockerized, liveness/readiness health probes
 
-> **API prefix:** routes are served under **`/api`** (e.g. `/api/auth/login`) — not `/api/v1`
-> despite the internal `api/v1/` package name. Interactive docs: **`/api/docs`**.
+> **API prefix:** first-party routes are served under **`/api/v1`** (for example,
+> `/api/v1/auth/login`). OAuth/OIDC remains under `/o/`. Interactive docs: **`/api/v1/docs`**.
 
 ---
 
 ## Prerequisites
 
 - **Docker + Docker Compose** (recommended path), **or**
-- **Python 3.12+**, **PostgreSQL 14+**, and **OpenSSL** (for the non-Docker path)
+- **Python 3.12+**, **PostgreSQL 14+**, **Redis 7+**, and **OpenSSL** (for the non-Docker path)
 
 ---
 
@@ -67,8 +68,8 @@ openssl rsa -in keys/jwt_private.pem -pubout -out keys/jwt_public.pem
 docker compose up --build
 ```
 
-This starts PostgreSQL and the web service, runs migrations, and serves the dev server on
-**http://localhost:8000**. Compose overrides `DB_HOST` to the `db` service automatically.
+This starts PostgreSQL, Redis, the web service, and the Celery worker; runs migrations; and serves
+the dev server on **http://localhost:8000**. Compose supplies the internal service hostnames.
 
 Create an admin user (custom user model — logs in by **email**):
 
@@ -82,7 +83,8 @@ Stop with `Ctrl+C`; `docker compose down` to remove containers (add `-v` to drop
 
 ## Run without Docker
 
-You need a running PostgreSQL with the credentials from your `.env` (and `DB_HOST=localhost`).
+You need PostgreSQL and Redis running with the values from `.env` (`DB_HOST=localhost` and
+`REDIS_CACHE_URL=redis://localhost:6379/1`).
 
 ```bash
 # 1. Virtual environment + dependencies
@@ -110,33 +112,33 @@ the terminal instead of being emailed.
 ## Verify it's up
 
 ```bash
-curl http://localhost:8000/api/health          # {"status": "ok"}
-curl http://localhost:8000/api/health/ready     # DB + signing-key readiness
-open  http://localhost:8000/api/docs            # interactive API docs
+curl http://localhost:8000/api/v1/health          # {"status": "ok"}
+curl http://localhost:8000/api/v1/health/ready    # DB + signing-key readiness
+open  http://localhost:8000/api/v1/docs           # interactive API docs
 ```
 
-### Key endpoints (under `/api`)
+### Key endpoints (under `/api/v1`)
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| POST | `/api/auth/register` | – | Register (creates inactive user, emails OTP) |
-| POST | `/api/auth/verify-email` | – | Verify OTP, activate, return tokens |
-| POST | `/api/auth/login` | – | Login; returns tokens, or an MFA challenge if 2FA is on |
-| POST | `/api/auth/mfa/setup` · `/confirm` | Bearer | Enroll TOTP; confirm returns recovery codes |
-| POST | `/api/auth/mfa/verify` | – | 2nd login step: challenge + TOTP/recovery → tokens |
-| GET  | `/api/auth/mfa/status` | Bearer | MFA status + recovery codes remaining |
-| POST | `/api/auth/mfa/disable` · `/recovery-codes` | Bearer | Disable / regenerate (re-auth required) |
-| POST | `/api/auth/refresh` | – | Rotate refresh token, return new pair |
-| GET  | `/api/auth/me` | Bearer | Current user profile |
-| POST | `/api/auth/change-password` | Bearer | Change password |
-| POST | `/api/auth/forgot-password` | – | Send reset link |
-| POST | `/api/auth/reset-password` | – | Reset via single-use token |
-| POST | `/api/auth/logout` / `/logout-all` | –/Bearer | Revoke session(s) |
+| POST | `/api/v1/auth/register` | – | Register (creates inactive user, emails OTP) |
+| POST | `/api/v1/auth/verify-email` | – | Verify OTP, activate, return tokens |
+| POST | `/api/v1/auth/login` | – | Login; returns tokens, or an MFA challenge if 2FA is on |
+| POST | `/api/v1/auth/mfa/setup` · `/confirm` | Bearer | Enroll TOTP; confirm returns recovery codes |
+| POST | `/api/v1/auth/mfa/verify` | – | 2nd login step: challenge + TOTP/recovery → tokens |
+| GET  | `/api/v1/auth/mfa/status` | Bearer | MFA status + recovery codes remaining |
+| POST | `/api/v1/auth/mfa/disable` · `/recovery-codes` | Bearer | Disable / regenerate (re-auth required) |
+| POST | `/api/v1/auth/refresh` | – | Rotate refresh token, return new pair |
+| GET  | `/api/v1/auth/me` | Bearer | Current user profile |
+| POST | `/api/v1/auth/change-password` | Bearer | Change password |
+| POST | `/api/v1/auth/forgot-password` | – | Send reset link |
+| POST | `/api/v1/auth/reset-password` | – | Reset via single-use token |
+| POST | `/api/v1/auth/logout` / `/logout-all` | –/Bearer | Revoke session(s) |
 | GET/POST | `/o/authorize` · `/o/token` | – | OAuth 2.1: auth-code+PKCE / client-credentials |
 | GET  | `/o/userinfo` · `/o/.well-known/openid-configuration` · `/o/.well-known/jwks.json` | – | OIDC |
-| GET  | `/api/.well-known/jwks.json` | – | Public keys for downstream verification |
-| POST | `/api/webhooks/resend` | Svix sig | Resend delivery events (bounce/complaint/etc.) |
-| GET  | `/api/health` · `/live` · `/ready` | – | Health / liveness / readiness |
+| GET  | `/api/v1/.well-known/jwks.json` | – | Public keys for downstream verification |
+| POST | `/api/v1/webhooks/resend` | Svix sig | Resend delivery events (bounce/complaint/etc.) |
+| GET  | `/api/v1/health` · `/live` · `/ready` | – | Health / liveness / readiness |
 
 Per-endpoint request/response examples live in [`docs/postman/`](docs/postman/).
 
@@ -188,6 +190,7 @@ ruff check src tests         # lint
 | `RESEND_WEBHOOK_SECRET` | – | Svix secret; required for the webhook + prod resend |
 | `CELERY_TASK_ALWAYS_EAGER` | `0` (dev `1`) | Run email tasks inline without a broker |
 | `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Redis broker for the Celery worker |
+| `REDIS_CACHE_URL` | `redis://localhost:6379/1` | Shared cache and distributed rate-limit counters |
 | `MFA_ISSUER_NAME` | `SusiAuth` | Issuer shown in authenticator apps |
 | `MFA_CHALLENGE_TTL_SECONDS` | `300` | Lifetime of the post-password MFA challenge |
 | `MFA_SECRET_ENCRYPTION_KEY` | `SECRET_KEY` | Key for encrypting TOTP secrets at rest |

@@ -7,6 +7,9 @@ out-of-order deliveries never downgrade a later status.
 from django.conf import settings
 from django.utils import timezone
 
+from authsvc.apps.audit.models import AuditEvent
+from authsvc.apps.audit.services import record_event
+
 from .models import OutboundEmail, WebhookEvent
 
 _EVENT_STATUS = {
@@ -102,3 +105,13 @@ def _apply_status(event_type: str, message_id: str) -> None:
     elif new_status in (OutboundEmail.Status.FAILED, OutboundEmail.Status.BOUNCED):
         email.failed_at = timezone.now()
     email.save(update_fields=["status", "delivered_at", "failed_at", "updated_at"])
+    audit_type = {
+        OutboundEmail.Status.BOUNCED: AuditEvent.EventType.EMAIL_BOUNCE,
+        OutboundEmail.Status.COMPLAINED: AuditEvent.EventType.EMAIL_COMPLAINT,
+    }.get(new_status)
+    if audit_type:
+        record_event(
+            audit_type,
+            target=("outbound_email", email.id),
+            metadata={"provider_message_id": message_id},
+        )

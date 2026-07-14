@@ -40,6 +40,7 @@ def test_verification_email_rendered_and_sent(user, django_capture_on_commit_cal
     assert len(InMemoryEmailProvider.outbox) == 1
     msg = InMemoryEmailProvider.outbox[0]
     assert msg.subject == "Verify your email"
+    assert msg.idempotency_key == email.idempotency_key
     assert "654321" in msg.text
     assert msg.html and "654321" in msg.html
 
@@ -114,7 +115,7 @@ def test_webhook_valid_signature_marks_delivered(client, settings):
     headers = _signed(WEBHOOK_SECRET, "evt_1", payload)
 
     resp = client.post(
-        "/api/webhooks/resend", data=payload, content_type="application/json", headers=headers
+        "/api/v1/webhooks/resend", data=payload, content_type="application/json", headers=headers
     )
 
     assert resp.status_code == 200
@@ -132,7 +133,7 @@ def test_webhook_invalid_signature_rejected(client, settings):
     headers["svix-signature"] = "v1,YmFkc2lnbmF0dXJl"  # tampered
 
     resp = client.post(
-        "/api/webhooks/resend", data=payload, content_type="application/json", headers=headers
+        "/api/v1/webhooks/resend", data=payload, content_type="application/json", headers=headers
     )
 
     assert resp.status_code == 400
@@ -142,16 +143,44 @@ def test_webhook_invalid_signature_rejected(client, settings):
 
 
 def test_webhook_duplicate_delivery_is_idempotent(client, settings):
+    from authsvc.apps.audit.models import AuditEvent
+
     settings.RESEND_WEBHOOK_SECRET = WEBHOOK_SECRET
     _outbound("msg_ghi")
     payload = json.dumps({"type": "email.bounced", "data": {"email_id": "msg_ghi"}})
     headers = _signed(WEBHOOK_SECRET, "evt_dup", payload)
 
-    r1 = client.post("/api/webhooks/resend", data=payload, content_type="application/json", headers=headers)
-    r2 = client.post("/api/webhooks/resend", data=payload, content_type="application/json", headers=headers)
+    r1 = client.post("/api/v1/webhooks/resend", data=payload, content_type="application/json", headers=headers)
+    r2 = client.post("/api/v1/webhooks/resend", data=payload, content_type="application/json", headers=headers)
 
     assert r1.status_code == 200 and r2.status_code == 200
     assert WebhookEvent.objects.filter(svix_id="evt_dup").count() == 1
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.EMAIL_BOUNCE
+    ).count() == 1
+
+
+def test_webhook_complaint_creates_security_event(client, settings):
+    from authsvc.apps.audit.models import AuditEvent
+
+    settings.RESEND_WEBHOOK_SECRET = WEBHOOK_SECRET
+    _outbound("msg_complaint")
+    payload = json.dumps(
+        {"type": "email.complained", "data": {"email_id": "msg_complaint"}}
+    )
+    headers = _signed(WEBHOOK_SECRET, "evt_complaint", payload)
+
+    response = client.post(
+        "/api/v1/webhooks/resend",
+        data=payload,
+        content_type="application/json",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.EMAIL_COMPLAINT
+    ).count() == 1
 
 
 def test_webhook_out_of_order_does_not_downgrade(client, settings):
@@ -162,7 +191,7 @@ def test_webhook_out_of_order_does_not_downgrade(client, settings):
     headers = _signed(WEBHOOK_SECRET, "evt_late", payload)
 
     resp = client.post(
-        "/api/webhooks/resend", data=payload, content_type="application/json", headers=headers
+        "/api/v1/webhooks/resend", data=payload, content_type="application/json", headers=headers
     )
 
     assert resp.status_code == 200
