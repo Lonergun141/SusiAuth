@@ -1,7 +1,7 @@
 # Change Password
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/change-password`
+**URL**: `{{base_url}}/api/v1/auth/change-password`
 
 ## Headers
 - `Content-Type`: `application/json`

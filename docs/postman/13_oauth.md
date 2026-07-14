@@ -1,7 +1,7 @@
 # OAuth 2.1 / OIDC
 
 Third-party client authorization via django-oauth-toolkit, mounted at `/o/`.
-First-party login (`/api/auth/*`) is separate — this is for OAuth **clients**.
+First-party login (`/api/v1/auth/*`) is separate — this is for OAuth **clients**.
 
 Register a client first (admin or CLI):
 ```bash

@@ -64,6 +64,7 @@ services:
       - DB_HOST=db
       - DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
     depends_on:
       db:
         condition: service_healthy
@@ -76,7 +77,7 @@ services:
     volumes:
       - ./keys:/app/keys:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health/ready || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v1/health/ready || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 20s
@@ -91,6 +92,7 @@ services:
       - DB_HOST=db
       - DJANGO_SETTINGS_MODULE=authsvc.config.settings.prod
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis:6379/1
     depends_on:
       db:
         condition: service_healthy

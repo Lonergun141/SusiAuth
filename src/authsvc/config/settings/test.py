@@ -29,6 +29,12 @@ CELERY_TASK_EAGER_PROPAGATES = True
 # Rate limiting depends on a shared cache and would interfere with rapid test
 # calls; disable it so tests exercise business logic, not throttling.
 RATELIMIT_ENABLE = False
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "susiauth-tests",
+    }
+}
 
 # Fast password hashing for tests.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]

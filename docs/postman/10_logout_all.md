@@ -1,7 +1,7 @@
 # Logout All Sessions
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/logout-all`
+**URL**: `{{base_url}}/api/v1/auth/logout-all`
 
 ## Headers
 - `Content-Type`: `application/json`

@@ -1,7 +1,7 @@
 # Refresh Access Token
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/refresh`
+**URL**: `{{base_url}}/api/v1/auth/refresh`
 
 ## Headers
 - `Content-Type`: `application/json`

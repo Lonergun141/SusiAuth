@@ -1,7 +1,7 @@
 # Verify Email
 
 **Method**: `POST`
-**URL**: `{{base_url}}/api/auth/verify-email`
+**URL**: `{{base_url}}/api/v1/auth/verify-email`
 
 ## Headers
 - `Content-Type`: `application/json`

@@ -9,7 +9,7 @@ Two-factor authentication using a TOTP authenticator app (Google Authenticator,
 
 ## Enroll — begin
 
-**POST** `{{base_url}}/api/auth/mfa/setup`  ·  Auth: `Bearer {{access}}`
+**POST** `{{base_url}}/api/v1/auth/mfa/setup`  ·  Auth: `Bearer {{access}}`
 
 ### Response (200)
 ```json
@@ -25,7 +25,7 @@ active until confirmed.
 
 ## Enroll — confirm
 
-**POST** `{{base_url}}/api/auth/mfa/confirm`  ·  Auth: `Bearer {{access}}`
+**POST** `{{base_url}}/api/v1/auth/mfa/confirm`  ·  Auth: `Bearer {{access}}`
 
 ```json
 { "code": "123456" }
@@ -40,7 +40,7 @@ active until confirmed.
 
 ## Login with MFA
 
-**POST** `{{base_url}}/api/auth/login` returns a challenge instead of tokens when
+**POST** `{{base_url}}/api/v1/auth/login` returns a challenge instead of tokens when
 2FA is enabled:
 ```json
 { "mfa_required": true, "mfa_token": "<short-lived jwt>" }
@@ -48,7 +48,7 @@ active until confirmed.
 
 Then exchange it:
 
-**POST** `{{base_url}}/api/auth/mfa/verify`  ·  no auth
+**POST** `{{base_url}}/api/v1/auth/mfa/verify`  ·  no auth
 ```json
 { "mfa_token": "<from login>", "code": "123456" }
 ```
@@ -64,15 +64,15 @@ Then exchange it:
 
 ## Status
 
-**GET** `{{base_url}}/api/auth/mfa/status`  ·  Auth: `Bearer {{access}}`
+**GET** `{{base_url}}/api/v1/auth/mfa/status`  ·  Auth: `Bearer {{access}}`
 ```json
 { "enabled": true, "recovery_codes_remaining": 9 }
 ```
 
 ## Disable / regenerate recovery codes
 
-**POST** `{{base_url}}/api/auth/mfa/disable`  ·  Auth: `Bearer {{access}}`
-**POST** `{{base_url}}/api/auth/mfa/recovery-codes`  ·  Auth: `Bearer {{access}}`
+**POST** `{{base_url}}/api/v1/auth/mfa/disable`  ·  Auth: `Bearer {{access}}`
+**POST** `{{base_url}}/api/v1/auth/mfa/recovery-codes`  ·  Auth: `Bearer {{access}}`
 
 Both require re-authentication:
 ```json

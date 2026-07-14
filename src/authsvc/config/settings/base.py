@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "anymail",
     "authsvc.apps.accounts",
     "authsvc.apps.tokens",
+    "authsvc.apps.audit.apps.AuditConfig",
     "authsvc.apps.notifications",
     "authsvc.apps.mfa",
 ]
@@ -71,8 +72,10 @@ DATABASES = {
 
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "unique-snowflake",
+        "BACKEND": "django_redis.cache.RedisCache",
+        # Keep cache/rate-limit data separate from the Celery broker (DB 0).
+        "LOCATION": os.getenv("REDIS_CACHE_URL", "redis://localhost:6379/1"),
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
     }
 }
 
@@ -99,7 +102,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # EMAIL_HOST_* settings. Resend-specific code lives in apps/notifications.
 EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "console")
 if EMAIL_PROVIDER == "resend":
-    EMAIL_BACKEND = "anymail.backends.resend.EmailBackend"
+    EMAIL_BACKEND = "authsvc.apps.notifications.resend_backend.EmailBackend"
 elif EMAIL_PROVIDER == "console":
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 elif EMAIL_PROVIDER == "inmemory":

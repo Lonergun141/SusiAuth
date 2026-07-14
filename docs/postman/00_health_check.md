@@ -1,7 +1,7 @@
 # Health Check
 
 **Method**: `GET`
-**URL**: `{{base_url}}/api/health`
+**URL**: `{{base_url}}/api/v1/health`
 
 ## Headers
 - `Content-Type`: `application/json`

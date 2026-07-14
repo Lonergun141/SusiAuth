@@ -8,6 +8,9 @@ import random
 from celery import shared_task
 from django.utils import timezone
 
+from authsvc.apps.audit.models import AuditEvent
+from authsvc.apps.audit.services import record_event
+
 from .models import OutboundEmail
 from .providers import EmailMessageData, get_email_provider
 
@@ -51,6 +54,7 @@ def send_outbound_email(self, email_id: str, subject: str, text: str, html: str 
         html=html,
         from_email=email.sender or None,
         headers={"X-Entity-Ref-ID": str(email.id)},
+        idempotency_key=email.idempotency_key,
     )
 
     try:
@@ -83,4 +87,10 @@ def send_outbound_email(self, email_id: str, subject: str, text: str, html: str 
             "last_error",
             "updated_at",
         ]
+    )
+    record_event(
+        AuditEvent.EventType.EMAIL_SUBMISSION,
+        actor=email.user,
+        target=("outbound_email", email.id),
+        metadata={"email_type": email.email_type, "provider": result.provider},
     )

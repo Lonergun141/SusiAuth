@@ -1,7 +1,7 @@
 # Get Current User Profile (Me)
 
 **Method**: `GET`
-**URL**: `{{base_url}}/api/auth/me`
+**URL**: `{{base_url}}/api/v1/auth/me`
 
 ## Headers
 - `Content-Type`: `application/json`

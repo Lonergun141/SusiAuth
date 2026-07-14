@@ -46,9 +46,9 @@ USER app
 EXPOSE 8000
 
 # Liveness probe — process is up. Readiness (DB + keys) is checked by the
-# orchestrator via /api/health/ready.
+# orchestrator via /api/v1/health/ready.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8000/api/health/live || exit 1
+    CMD curl -fsS http://localhost:8000/api/v1/health/live || exit 1
 
 # Production server. Migrations are run as a separate step (see
 # docker-compose.prod.yml), never implicitly from the web container.
