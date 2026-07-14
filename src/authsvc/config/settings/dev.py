@@ -1,8 +1,8 @@
+import os
+
 from .base import *  # noqa
 
 DEBUG = True
-
-import os
 
 # Email
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")

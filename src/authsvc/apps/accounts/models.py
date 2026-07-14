@@ -1,7 +1,9 @@
-from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
+import uuid
+
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
-import uuid
+
 
 class UserManager(BaseUserManager):
     def create_user(self, email: str, password: str | None = None, **extra):

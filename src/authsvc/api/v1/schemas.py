@@ -1,5 +1,6 @@
 from ninja import Schema
-from pydantic import EmailStr, Field
+from pydantic import EmailStr
+
 
 class RegistrationFieldOut(Schema):
     name: str

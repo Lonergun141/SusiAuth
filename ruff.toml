@@ -1,0 +1,10 @@
+# Ruff configuration.
+# E501 (line length) is ignored for now to avoid reflowing pre-existing code;
+# tighten this in a dedicated formatting pass.
+line-length = 100
+target-version = "py312"
+extend-exclude = ["**/migrations/**"]
+
+[lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

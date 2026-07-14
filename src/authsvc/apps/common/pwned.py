@@ -1,6 +1,8 @@
 import hashlib
+
 import requests
 from ninja.errors import HttpError
+
 
 def is_password_pwned(password: str) -> bool:
     """
